@@ -483,6 +483,103 @@ pub(crate) fn wait_idle(context: &crate::context::Context) -> Result<(), Graphic
     Ok(())
 }
 
+pub(crate) fn create_query(
+    device: &Device,
+    kind: crate::query::QueryType,
+) -> Result<crate::query::Query, GraphicsError> {
+    use windows::Win32::Graphics::Direct3D11::D3D11_QUERY_OCCLUSION;
+
+    let query_type = match kind {
+        crate::query::QueryType::Occlusion => D3D11_QUERY_OCCLUSION,
+        crate::query::QueryType::Event => D3D11_QUERY_EVENT,
+    };
+    let query_desc = D3D11_QUERY_DESC {
+        Query: query_type,
+        MiscFlags: 0,
+    };
+
+    let mut query: Option<ID3D11Query> = None;
+    unsafe { device.raw.device.CreateQuery(&query_desc, Some(&mut query)) }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let query = query.ok_or_else(|| GraphicsError::Backend("CreateQuery não retornou uma query".into()))?;
+
+    Ok(crate::query::Query { raw: query, kind })
+}
+
+/// `D3D11_ASYNC_GETDATA_DONOTFLUSH`: sem essa flag, `GetData` pode
+/// bloquear internamente até o resultado ficar pronto — com ela, só
+/// consulta o estado atual.
+const ASYNC_GETDATA_DONOTFLUSH: u32 = 1;
+
+pub(crate) fn is_query_ready(context: &crate::context::Context, query: &crate::query::Query) -> bool {
+    let mut result = windows::Win32::Foundation::BOOL(0);
+    let got_data = unsafe {
+        context.raw.GetData(
+            &query.raw,
+            Some(&mut result as *mut _ as *mut _),
+            std::mem::size_of_val(&result) as u32,
+            ASYNC_GETDATA_DONOTFLUSH,
+        )
+    };
+    got_data.is_ok() && result.as_bool()
+}
+
+pub(crate) fn get_occlusion_result(
+    context: &crate::context::Context,
+    query: &crate::query::Query,
+) -> Option<u64> {
+    let mut result: u64 = 0;
+    let got_data = unsafe {
+        context.raw.GetData(
+            &query.raw,
+            Some(&mut result as *mut _ as *mut _),
+            std::mem::size_of_val(&result) as u32,
+            ASYNC_GETDATA_DONOTFLUSH,
+        )
+    };
+    if got_data.is_ok() {
+        Some(result)
+    } else {
+        None
+    }
+}
+
+fn user_defined_annotation(
+    context: &crate::context::Context,
+) -> Option<windows::Win32::Graphics::Direct3D11::ID3DUserDefinedAnnotation> {
+    context.raw.cast().ok()
+}
+
+fn to_pcwstr_vec(label: &str) -> Vec<u16> {
+    label.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+pub(crate) fn push_debug_group(context: &crate::context::Context, label: &str) {
+    if let Some(annotation) = user_defined_annotation(context) {
+        let wide = to_pcwstr_vec(label);
+        unsafe {
+            annotation.BeginEvent(windows::core::PCWSTR(wide.as_ptr()));
+        }
+    }
+}
+
+pub(crate) fn pop_debug_group(context: &crate::context::Context) {
+    if let Some(annotation) = user_defined_annotation(context) {
+        unsafe {
+            annotation.EndEvent();
+        }
+    }
+}
+
+pub(crate) fn insert_debug_marker(context: &crate::context::Context, label: &str) {
+    if let Some(annotation) = user_defined_annotation(context) {
+        let wide = to_pcwstr_vec(label);
+        unsafe {
+            annotation.SetMarker(windows::core::PCWSTR(wide.as_ptr()));
+        }
+    }
+}
+
 fn blend_factor_to_d3d(
     factor: crate::blend::BlendFactor,
 ) -> windows::Win32::Graphics::Direct3D11::D3D11_BLEND {

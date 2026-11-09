@@ -46,24 +46,26 @@ cursor, monitores), com os backends `headless` e `windows` (via `winit`)
 funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
 árvore de módulos como stubs reservados para a integração real com cada SO.
 
-`ndl-render` ainda tem módulos reservados (`compute`, `transfer`, `query`,
-`sync`, `debug`), documentados com os tipos e métodos planejados, mas sem
-implementação.
+Só `compute` ainda é puramente reservado em `ndl-render` — precisa de
+compute shader como novo estágio programável, então fica para uma rodada
+dedicada.
 
 `ndl-render::core`, `format`, `surface`, `context`, `view`, `buffer`,
 `shader`, `input` (incluindo draw indexado), `pipeline`, `texture`,
 `sampler`, `raster` (`Viewport`), `depth_stencil`, `blend`, `command`,
-`queue`, `memory` e `resource` já são **reais**: dá para compilar HLSL em
-runtime (`shader::compile_hlsl`), criar vertex/pixel shader, input
-layout, vertex/index/constant buffer, texturas com upload de dados,
-samplers, depth buffer com teste de profundidade, blending com
-transparência, um `GraphicsPipeline`, gravar comandos num contexto
-diferido (`CommandEncoder`) e submetê-los numa `GraphicsQueue`, mapear um
-buffer dinâmico com desmapeio automático (`Context::map_write_discard` +
-`MappedBuffer`), girar entre N constant buffers (`memory::ConstantBufferRing`)
-em vez de travar a GPU reescrevendo o mesmo todo quadro, nomear recursos
-para debug (`set_label`), e desenhar geometria texturizada de verdade
-numa janela real.
+`queue`, `memory`, `resource`, `transfer`, `query`, `sync` e `debug` já
+são **reais**: dá para compilar HLSL em runtime (`shader::compile_hlsl`),
+criar vertex/pixel shader, input layout, vertex/index/constant buffer,
+texturas com upload de dados, samplers, depth buffer com teste de
+profundidade, blending com transparência, um `GraphicsPipeline`, gravar
+comandos num contexto diferido (`CommandEncoder`) e submetê-los numa
+`GraphicsQueue`, mapear um buffer dinâmico com desmapeio automático
+(`Context::map_write_discard` + `MappedBuffer`), girar entre N constant
+buffers (`memory::ConstantBufferRing`), nomear recursos para debug
+(`set_label`), copiar recursos (`Context::copy_buffer`/`copy_texture`),
+medir oclusão (`query::Query`), sincronizar CPU/GPU (`sync::GpuFence`),
+marcar grupos/eventos de debug (`push_debug_group`/`insert_debug_marker`),
+e desenhar geometria texturizada de verdade numa janela real.
 
 `CommandEncoder` reaproveita a própria `Context` por baixo (via `Deref`) —
 no D3D11, um contexto diferido é a mesma interface do contexto imediato,
