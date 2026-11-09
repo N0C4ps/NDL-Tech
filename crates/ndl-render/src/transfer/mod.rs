@@ -14,6 +14,7 @@
 //! (`resolve_texture`) e geração de mipmaps (`generate_mips`) continuam
 //! reservadas.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::buffer::Buffer;
 use crate::context::Context;
 use crate::core::{Device, GraphicsError};
@@ -24,27 +25,13 @@ impl Context {
     /// Copia todo o conteúdo de `src` para `dst`. Os dois buffers
     /// precisam ter o mesmo tamanho.
     pub fn copy_buffer(&self, src: &Buffer, dst: &Buffer) {
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.CopyResource(&dst.raw, &src.raw);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (src, dst);
-        }
+        ActiveBackend::copy_buffer(self, src, dst);
     }
 
     /// Copia todo o conteúdo de `src` para `dst`. As duas texturas
     /// precisam ter as mesmas dimensões e formato.
     pub fn copy_texture(&self, src: &Texture2D, dst: &Texture2D) {
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.CopyResource(&dst.raw, &src.raw);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (src, dst);
-        }
+        ActiveBackend::copy_texture(self, src, dst);
     }
 }
 
@@ -57,18 +44,7 @@ impl Device {
     /// do [`crate::render::RenderPass`] que o preencheu ter terminado
     /// (`RenderPass::end`).
     pub fn capture_texture(&self, texture: &Texture2D) -> Result<FrameCapture, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            let (width, height, format, pixels) =
-                crate::backend::directx::capture_texture(self, texture)?;
-            return Ok(FrameCapture::new(width, height, format, pixels));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = texture;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        let (width, height, format, pixels) = ActiveBackend::capture_texture(self, texture)?;
+        Ok(FrameCapture::new(width, height, format, pixels))
     }
 }

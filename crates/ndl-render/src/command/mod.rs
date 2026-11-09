@@ -22,6 +22,7 @@
 
 use std::ops::Deref;
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::context::Context;
 use crate::core::{Device, GraphicsError};
 
@@ -37,7 +38,6 @@ pub struct CommandEncoder {
 }
 
 impl CommandEncoder {
-    #[cfg(target_os = "windows")]
     pub(crate) fn from_context(context: Context) -> Self {
         Self { context }
     }
@@ -46,16 +46,7 @@ impl CommandEncoder {
     /// submetido numa [`crate::queue::GraphicsQueue`]. Nenhum comando
     /// gravado roda na GPU antes disso.
     pub fn finish(self) -> Result<CommandBuffer, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::finish_command_list(&self.context)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::finish_command_list(&self.context)
     }
 }
 
@@ -70,13 +61,11 @@ impl Deref for CommandEncoder {
 /// Uma lista de comandos já gravada e pronta para execução — ver
 /// [`crate::queue::GraphicsQueue::submit`].
 pub struct CommandBuffer {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11CommandList,
+    pub(crate) raw: <ActiveBackend as Backend>::RawCommandBuffer,
 }
 
 impl CommandBuffer {
-    #[cfg(target_os = "windows")]
-    pub(crate) fn from_raw(raw: windows::Win32::Graphics::Direct3D11::ID3D11CommandList) -> Self {
+    pub(crate) fn from_raw(raw: <ActiveBackend as Backend>::RawCommandBuffer) -> Self {
         Self { raw }
     }
 }
@@ -84,15 +73,6 @@ impl CommandBuffer {
 impl Device {
     /// Cria um novo [`CommandEncoder`] com um contexto diferido próprio.
     pub fn create_command_encoder(&self) -> Result<CommandEncoder, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::create_command_encoder(self)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_command_encoder(self)
     }
 }

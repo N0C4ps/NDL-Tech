@@ -23,6 +23,7 @@
 //! atualização/cópia depois da criação (`write_texture`,
 //! `resolve_texture`, ...) continuam reservados.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::context::Context;
 use crate::core::{Device, GraphicsError};
 use crate::format::Format;
@@ -49,8 +50,7 @@ pub struct TextureDescriptor {
 
 /// Uma textura 2D — hoje sem multisampling.
 pub struct Texture2D {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
+    pub(crate) raw: <ActiveBackend as Backend>::RawTexture2D,
     width: u32,
     height: u32,
     format: Format,
@@ -59,9 +59,8 @@ pub struct Texture2D {
 }
 
 impl Texture2D {
-    #[cfg(target_os = "windows")]
     pub(crate) fn from_raw(
-        raw: windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
+        raw: <ActiveBackend as Backend>::RawTexture2D,
         width: u32,
         height: u32,
         format: Format,
@@ -249,17 +248,7 @@ impl Device {
             }
         }
 
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_texture_2d(self, desc, mip_data);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (desc, mip_data);
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_texture_2d(self, desc, mip_data)
     }
 
     /// Cria uma textura 2D sem dados iniciais, já com uma
@@ -314,17 +303,7 @@ impl Device {
                 feature: format!("render target no formato {:?}", desc.format),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_render_target_texture(self, desc);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = desc;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_render_target_texture(self, desc)
     }
 
     /// Cria uma [`ShaderResourceView`] padrão (toda a textura, formato
@@ -334,17 +313,7 @@ impl Device {
         &self,
         texture: &Texture2D,
     ) -> Result<ShaderResourceView, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_shader_resource_view(self, texture);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = texture;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_shader_resource_view(self, texture)
     }
 }
 
@@ -358,13 +327,6 @@ impl Context {
     /// antes de desenhar usando `view` à distância da câmera.
     pub fn generate_mips(&self, view: &ShaderResourceView) {
         let _guard = self.lock_context();
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.GenerateMips(&view.raw);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = view;
-        }
+        ActiveBackend::generate_mips(self, view);
     }
 }

@@ -16,6 +16,7 @@
 //! (`set_uav_initial_count`/`reset_uav_counter`) e texturas como alvo de
 //! compute (hoje só buffers) continuam reservados.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::context::Context;
 use crate::pipeline::ComputePipeline;
 use crate::view::UnorderedAccessView;
@@ -23,14 +24,7 @@ use crate::view::UnorderedAccessView;
 impl Context {
     /// Define o compute shader a ser usado pelos próximos `dispatch()`.
     pub fn set_compute_pipeline(&self, pipeline: &ComputePipeline) {
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.CSSetShader(&pipeline.compute_shader, None);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = pipeline;
-        }
+        ActiveBackend::set_compute_pipeline(self, pipeline);
     }
 
     /// Vincula `buffer` ao slot `slot` de constant buffer do compute
@@ -55,15 +49,7 @@ impl Context {
                 reason: "o buffer precisa ter BufferUsage::Constant".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .CSSetConstantBuffers(slot, Some(&[Some(buffer.raw.clone())]));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (slot, buffer);
-        }
+        ActiveBackend::set_compute_constant_buffer(self, slot, buffer);
         Ok(())
     }
 
@@ -83,15 +69,7 @@ impl Context {
                 limit: limit as u64,
             });
         }
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .CSSetUnorderedAccessViews(slot, 1, Some(&Some(view.raw.clone())), None);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (slot, view);
-        }
+        ActiveBackend::set_unordered_access_view(self, slot, view);
         Ok(())
     }
 
@@ -109,14 +87,7 @@ impl Context {
         if x == 0 || y == 0 || z == 0 {
             return Ok(());
         }
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.Dispatch(x, y, z);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (x, y, z);
-        }
+        ActiveBackend::dispatch(self, x, y, z);
         Ok(())
     }
 
@@ -136,15 +107,7 @@ impl Context {
             DispatchIndirectArgs::SIZE,
             "dispatch_indirect",
         )?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .DispatchIndirect(&args_buffer.raw, args_offset as u32);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (args_buffer, args_offset);
-        }
+        ActiveBackend::dispatch_indirect(self, args_buffer, args_offset);
         Ok(())
     }
 }

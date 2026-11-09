@@ -14,6 +14,7 @@
 //! (não existe um `Flush()` que bloqueie — isso é construído por cima de
 //! `End`/`GetData` polling).
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::command::CommandBuffer;
 use crate::core::{Device, GraphicsError};
 
@@ -23,7 +24,6 @@ pub struct GraphicsQueue {
 }
 
 impl GraphicsQueue {
-    #[cfg(target_os = "windows")]
     pub(crate) fn from_context(context: crate::context::Context) -> Self {
         Self { context }
     }
@@ -32,20 +32,10 @@ impl GraphicsQueue {
     /// [`crate::command::CommandEncoder`].
     pub fn submit(&self, buffers: &[CommandBuffer]) -> Result<(), GraphicsError> {
         let _guard = self.context.lock_context();
-        #[cfg(target_os = "windows")]
-        {
-            for buffer in buffers {
-                crate::backend::directx::execute_command_list(&self.context, buffer);
-            }
-            Ok(())
+        for buffer in buffers {
+            ActiveBackend::execute_command_list(&self.context, buffer);
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = buffers;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        Ok(())
     }
 
     /// Força o envio de qualquer comando ainda pendente no contexto
@@ -58,14 +48,7 @@ impl GraphicsQueue {
     /// até agora.
     pub fn wait_idle(&self) -> Result<(), GraphicsError> {
         let _guard = self.context.lock_context();
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::wait_idle(&self.context)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Ok(())
-        }
+        ActiveBackend::wait_idle(&self.context)
     }
 }
 
@@ -73,15 +56,6 @@ impl Device {
     /// A fila gráfica deste dispositivo, por cima do seu contexto
     /// imediato.
     pub fn queue(&self) -> GraphicsQueue {
-        #[cfg(target_os = "windows")]
-        {
-            GraphicsQueue::from_context(self.context())
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            GraphicsQueue {
-                context: self.context(),
-            }
-        }
+        GraphicsQueue::from_context(self.context())
     }
 }

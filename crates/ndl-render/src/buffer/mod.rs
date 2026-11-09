@@ -18,6 +18,7 @@
 //! imutável é escrito uma vez, na criação, via
 //! [`crate::core::Device::create_buffer_with_data`].
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::core::{Device, GraphicsError};
 use crate::view::UnorderedAccessView;
 
@@ -59,8 +60,7 @@ pub struct BufferDescriptor {
 
 /// Um buffer de GPU (vertex, index, constant ou structured).
 pub struct Buffer {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11Buffer,
+    pub(crate) raw: <ActiveBackend as Backend>::RawBuffer,
     size: u64,
     usage: BufferUsage,
     stride: u32,
@@ -68,9 +68,8 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    #[cfg(target_os = "windows")]
     pub(crate) fn from_raw(
-        raw: windows::Win32::Graphics::Direct3D11::ID3D11Buffer,
+        raw: <ActiveBackend as Backend>::RawBuffer,
         size: u64,
         usage: BufferUsage,
         stride: u32,
@@ -109,17 +108,7 @@ impl Device {
     /// buffers dinâmicos, que serão escritos depois.
     pub fn create_buffer(&self, desc: &BufferDescriptor) -> Result<Buffer, GraphicsError> {
         validate_descriptor(desc, self.limits().max_buffer_size)?;
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_buffer(self, desc, None);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = desc;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_buffer(self, desc, None)
     }
 
     /// Cria um buffer já inicializado com `data` (deve ter `desc.size` bytes).
@@ -135,17 +124,7 @@ impl Device {
                 actual: data.len() as u64,
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_buffer(self, desc, Some(data));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (desc, data);
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_buffer(self, desc, Some(data))
     }
 
     /// Cria uma [`UnorderedAccessView`] para `buffer`, que precisa ter
@@ -165,17 +144,7 @@ impl Device {
                 feature: "unordered access views neste dispositivo".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_unordered_access_view(self, buffer);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = buffer;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_unordered_access_view(self, buffer)
     }
 }
 
