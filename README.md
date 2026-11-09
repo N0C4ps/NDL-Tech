@@ -46,21 +46,23 @@ cursor, monitores), com os backends `headless` e `windows` (via `winit`)
 funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
 árvore de módulos como stubs reservados para a integração real com cada SO.
 
-`ndl-render` tem a árvore de módulos inteira reservada (`context`, `command`,
-`queue`, `resource`, `memory`, `buffer`, `texture`, `view`, `shader`,
-`pipeline`, `input`, `raster`, `blend`, `depth_stencil`, `sampler`, `render`,
-`compute`, `transfer`, `query`, `sync`, `debug`), cada uma documentada com
-os tipos e métodos planejados — mas ainda sem implementação.
+`ndl-render` tem a árvore de módulos inteira reservada (`command`, `queue`,
+`resource`, `memory`, `buffer`, `texture`, `shader`, `pipeline`, `input`,
+`raster`, `blend`, `depth_stencil`, `sampler`, `render`, `compute`,
+`transfer`, `query`, `sync`, `debug`), cada uma documentada com os tipos e
+métodos planejados — mas ainda sem implementação.
 
-`ndl-render::core`, `ndl-render::format` e `ndl-render::surface` já são
-**reais**: `Device::new()` cria um dispositivo Direct3D 11 de verdade (via
+`ndl-render::core`, `ndl-render::format`, `ndl-render::surface`,
+`ndl-render::context` e `ndl-render::view` já são **reais**:
+`Device::new()` cria um dispositivo Direct3D 11 de verdade (via
 `backend::directx`, `windows-rs`), com `DeviceCapabilities`/`DeviceLimits`
 derivados do `FeatureLevel` obtido; `Instance::enumerate_adapters()` lista
 as GPUs do sistema via DXGI; `Format` cobre as principais famílias de pixel
-format com conversão para/do `DXGI_FORMAT` nativo; e `Surface`/`Swapchain`
+format com conversão para/do `DXGI_FORMAT` nativo; `Surface`/`Swapchain`
 conectam um `RawWindowHandle` (crate `raw-window-handle`) a uma swapchain
-real, com `clear_and_present` já limpando e apresentando quadros numa
-janela de verdade.
+real; `Context` (contexto imediato) e `RenderTargetView` (RTV) já limpam e
+apresentam quadros de verdade numa janela real, com `Swapchain::clear_and_present`
+como conveniência por cima desses três passos.
 
 **`ndl-render` nunca depende de `ndl-platform`** (nem de nenhuma outra lib
 de janela) — `Surface::from_window_handle` recebe um `RawWindowHandle`

@@ -19,6 +19,7 @@ use raw_window_handle::RawWindowHandle;
 
 use crate::core::{Device, GraphicsError};
 use crate::format::Format;
+use crate::view::RenderTargetView;
 
 /// Dimensões em pixels de uma superfície/swapchain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +106,9 @@ pub struct Swapchain {
     size: Extent2D,
     format: Format,
     present_mode: PresentMode,
+    /// Cacheada na primeira vez que é pedida; invalidada em `resize`,
+    /// porque o buffer físico por trás dela muda.
+    render_target_view: Option<RenderTargetView>,
 }
 
 impl Swapchain {
@@ -121,6 +125,7 @@ impl Swapchain {
                 size: desc.size,
                 format: desc.format,
                 present_mode: desc.present_mode,
+                render_target_view: None,
             });
         }
         #[cfg(not(target_os = "windows"))]
@@ -153,6 +158,10 @@ impl Swapchain {
     /// `WindowEvent::Resized` vindo de `ndl-platform`, repassado pelo
     /// código do jogo).
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), GraphicsError> {
+        // A view antiga aponta para o back buffer anterior — inválida
+        // depois do resize, então é descartada e recriada sob demanda.
+        self.render_target_view = None;
+
         #[cfg(target_os = "windows")]
         {
             crate::backend::directx::resize_swapchain(&mut self.raw, width, height)?;
@@ -161,27 +170,50 @@ impl Swapchain {
         Ok(())
     }
 
-    /// Limpa o back buffer atual com a cor dada e apresenta o quadro.
-    ///
-    /// Isso é um atalho temporário enquanto `context`/`render` ainda não
-    /// existem — quando esses módulos forem implementados, limpar e
-    /// desenhar passam a ser passos separados de um `RenderPass` real.
-    pub fn clear_and_present(&mut self, device: &Device, color: [f32; 4]) -> Result<PresentResult, GraphicsError> {
+    /// A [`RenderTargetView`] do back buffer atual, criando-a (e
+    /// cacheando) se ainda não existir.
+    pub fn render_target_view(&mut self, device: &Device) -> Result<&RenderTargetView, GraphicsError> {
+        if self.render_target_view.is_none() {
+            #[cfg(target_os = "windows")]
+            {
+                let view = crate::backend::directx::create_swapchain_render_target_view(device, &self.raw)?;
+                self.render_target_view = Some(view);
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = device;
+                return Err(GraphicsError::Unsupported(
+                    "nenhum backend gráfico implementado para este SO ainda",
+                ));
+            }
+        }
+        Ok(self.render_target_view.as_ref().expect("acabou de ser preenchida"))
+    }
+
+    /// Apresenta o quadro atual.
+    pub fn present(&self) -> Result<PresentResult, GraphicsError> {
         #[cfg(target_os = "windows")]
         {
-            return crate::backend::directx::clear_and_present(
-                device,
-                &self.raw,
-                color,
-                self.present_mode,
-            );
+            return crate::backend::directx::present(&self.raw, self.present_mode);
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = (device, color);
             Err(GraphicsError::Unsupported(
                 "nenhum backend gráfico implementado para este SO ainda",
             ))
         }
+    }
+
+    /// Limpa o back buffer atual com a cor dada e apresenta o quadro.
+    ///
+    /// Conveniência por cima de [`Device::context`] + [`Swapchain::render_target_view`]
+    /// + [`Swapchain::present`] — útil enquanto `render` (passes de desenho
+    /// de verdade) ainda não existe. Jogos que precisam desenhar mais do
+    /// que uma cor sólida devem usar esses três passos diretamente.
+    pub fn clear_and_present(&mut self, device: &Device, color: [f32; 4]) -> Result<PresentResult, GraphicsError> {
+        let context = device.context();
+        let view = self.render_target_view(device)?;
+        context.clear_render_target(view, color);
+        self.present()
     }
 }

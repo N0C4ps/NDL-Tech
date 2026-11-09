@@ -219,15 +219,13 @@ pub(crate) fn resize_swapchain(
         .map_err(|err| GraphicsError::Backend(err.to_string()))
 }
 
-/// Limpa o back buffer atual e apresenta — atalho temporário até
-/// `context`/`render` existirem de verdade (ver doc de
-/// `Swapchain::clear_and_present`).
-pub(crate) fn clear_and_present(
+/// Cria a [`crate::view::RenderTargetView`] do back buffer atual da
+/// swapchain — precisa ser recriada após `resize_swapchain`, já que o
+/// buffer físico por trás dela muda.
+pub(crate) fn create_swapchain_render_target_view(
     device: &Device,
     raw: &RawSwapchain,
-    color: [f32; 4],
-    present_mode: PresentMode,
-) -> Result<PresentResult, GraphicsError> {
+) -> Result<crate::view::RenderTargetView, GraphicsError> {
     let back_buffer: ID3D11Texture2D = unsafe { raw.swapchain.GetBuffer(0) }
         .map_err(|err| GraphicsError::Backend(err.to_string()))?;
 
@@ -243,10 +241,11 @@ pub(crate) fn clear_and_present(
         GraphicsError::Backend("CreateRenderTargetView não retornou uma view".into())
     })?;
 
-    unsafe {
-        device.raw.context.ClearRenderTargetView(&render_target_view, &color);
-    }
+    Ok(crate::view::RenderTargetView::from_raw(render_target_view))
+}
 
+/// Apresenta o quadro atual da swapchain.
+pub(crate) fn present(raw: &RawSwapchain, present_mode: PresentMode) -> Result<PresentResult, GraphicsError> {
     // VSync por padrão: "liso" numa GPU topo de linha não significa nada
     // numa GPU mais modesta — nunca presumimos Immediate sem o jogo pedir.
     let sync_interval = match present_mode {

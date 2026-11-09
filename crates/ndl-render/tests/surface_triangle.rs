@@ -105,3 +105,45 @@ fn clears_a_real_window_to_a_color() {
         let _ = DestroyWindow(hwnd);
     }
 }
+
+#[test]
+fn clears_using_context_and_view_directly() {
+    use ndl_render::context::Context;
+
+    let hwnd = create_raw_window(640, 480);
+
+    let mut handle = Win32WindowHandle::new(NonZeroIsize::new(hwnd.0 as isize).unwrap());
+    handle.hinstance = None;
+    let raw_handle = RawWindowHandle::Win32(handle);
+
+    let device = Device::new(&DeviceDescriptor::default()).expect("falha ao criar device");
+    let surface = Surface::from_window_handle(raw_handle).expect("falha ao criar surface");
+
+    let mut swapchain = Swapchain::new(
+        &device,
+        &surface,
+        &SwapchainDescriptor {
+            size: Extent2D::new(640, 480),
+            ..Default::default()
+        },
+    )
+    .expect("falha ao criar swapchain");
+
+    let context: Context = device.context();
+
+    for _ in 0..10 {
+        pump_messages();
+        let view = swapchain
+            .render_target_view(&device)
+            .expect("falha ao obter a render target view");
+        context.set_render_target(view);
+        context.clear_render_target(view, [0.8, 0.1, 0.1, 1.0]);
+        context.flush();
+        swapchain.present().expect("falha ao apresentar");
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+
+    unsafe {
+        let _ = DestroyWindow(hwnd);
+    }
+}

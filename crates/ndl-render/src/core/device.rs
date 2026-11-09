@@ -52,6 +52,19 @@ impl Device {
         self.capabilities.is_software
     }
 
+    /// O contexto imediato deste dispositivo — por onde comandos de
+    /// limpeza/desenho são submetidos.
+    pub fn context(&self) -> crate::context::Context {
+        #[cfg(target_os = "windows")]
+        {
+            crate::context::Context::from_raw(self.raw.context.clone())
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            crate::context::Context {}
+        }
+    }
+
     /// Se o dispositivo foi perdido (driver crashou, GPU removida, etc.) e
     /// precisa ser recriado.
     pub fn is_lost(&self) -> bool {
