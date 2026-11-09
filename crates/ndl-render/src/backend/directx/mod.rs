@@ -10,11 +10,18 @@ use windows::Win32::Graphics::Direct3D::{
     D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
     D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_3,
 };
+use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
+use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11RenderTargetView, ID3D11Texture2D,
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_FLAG,
-    D3D11_SDK_VERSION,
+    D3D11CreateDevice, ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout,
+    ID3D11PixelShader, ID3D11RenderTargetView, ID3D11Texture2D, ID3D11VertexShader,
+    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_FLAG, D3D11_BIND_INDEX_BUFFER, D3D11_BIND_VERTEX_BUFFER,
+    D3D11_BUFFER_DESC, D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+    D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_FLAG, D3D11_INPUT_ELEMENT_DESC,
+    D3D11_INPUT_PER_VERTEX_DATA, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT,
+    D3D11_USAGE_DYNAMIC,
 };
+use windows::core::PCSTR;
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC,
 };
@@ -138,6 +145,207 @@ pub(crate) fn enumerate_adapters() -> Result<Vec<AdapterInfo>, GraphicsError> {
     }
 
     Ok(adapters)
+}
+
+fn bind_flag_for_usage(usage: crate::buffer::BufferUsage) -> D3D11_BIND_FLAG {
+    use crate::buffer::BufferUsage::*;
+    match usage {
+        Vertex => D3D11_BIND_VERTEX_BUFFER,
+        Index => D3D11_BIND_INDEX_BUFFER,
+        Constant => D3D11_BIND_CONSTANT_BUFFER,
+    }
+}
+
+pub(crate) fn create_buffer(
+    device: &Device,
+    desc: &crate::buffer::BufferDescriptor,
+    data: Option<&[u8]>,
+) -> Result<crate::buffer::Buffer, GraphicsError> {
+    if let Some(data) = data {
+        if data.len() as u64 != desc.size {
+            return Err(GraphicsError::Backend(format!(
+                "dados fornecidos ({} bytes) não têm o mesmo tamanho do descriptor ({} bytes)",
+                data.len(),
+                desc.size
+            )));
+        }
+    }
+
+    let buffer_desc = D3D11_BUFFER_DESC {
+        ByteWidth: desc.size as u32,
+        Usage: if desc.dynamic {
+            D3D11_USAGE_DYNAMIC
+        } else {
+            D3D11_USAGE_DEFAULT
+        },
+        BindFlags: bind_flag_for_usage(desc.usage).0 as u32,
+        CPUAccessFlags: if desc.dynamic {
+            D3D11_CPU_ACCESS_WRITE.0 as u32
+        } else {
+            0
+        },
+        MiscFlags: 0,
+        StructureByteStride: 0,
+    };
+
+    let initial_data = data.map(|bytes| D3D11_SUBRESOURCE_DATA {
+        pSysMem: bytes.as_ptr() as *const _,
+        SysMemPitch: 0,
+        SysMemSlicePitch: 0,
+    });
+
+    let mut buffer: Option<ID3D11Buffer> = None;
+    unsafe {
+        device.raw.device.CreateBuffer(
+            &buffer_desc,
+            initial_data.as_ref().map(|d| d as *const _),
+            Some(&mut buffer),
+        )
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let buffer = buffer
+        .ok_or_else(|| GraphicsError::Backend("CreateBuffer não retornou um buffer".into()))?;
+
+    Ok(crate::buffer::Buffer::from_raw(buffer, desc.size, desc.usage))
+}
+
+pub(crate) fn compile_hlsl(
+    source: &str,
+    entry_point: &str,
+    target: &str,
+) -> Result<Vec<u8>, GraphicsError> {
+    let entry_point_c = std::ffi::CString::new(entry_point)
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let target_c =
+        std::ffi::CString::new(target).map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let mut code: Option<ID3DBlob> = None;
+    let mut errors: Option<ID3DBlob> = None;
+
+    let result = unsafe {
+        D3DCompile(
+            source.as_ptr() as *const _,
+            source.len(),
+            None,
+            None,
+            None,
+            PCSTR(entry_point_c.as_ptr() as *const u8),
+            PCSTR(target_c.as_ptr() as *const u8),
+            0,
+            0,
+            &mut code,
+            Some(&mut errors),
+        )
+    };
+
+    if let Err(err) = result {
+        let message = errors
+            .map(|blob| blob_to_string(&blob))
+            .unwrap_or_else(|| err.message());
+        return Err(GraphicsError::Backend(message));
+    }
+
+    let code = code
+        .ok_or_else(|| GraphicsError::Backend("D3DCompile não retornou bytecode".into()))?;
+    Ok(blob_to_bytes(&code))
+}
+
+fn blob_to_bytes(blob: &ID3DBlob) -> Vec<u8> {
+    unsafe {
+        let ptr = blob.GetBufferPointer() as *const u8;
+        let len = blob.GetBufferSize();
+        std::slice::from_raw_parts(ptr, len).to_vec()
+    }
+}
+
+fn blob_to_string(blob: &ID3DBlob) -> String {
+    String::from_utf8_lossy(&blob_to_bytes(blob)).into_owned()
+}
+
+pub(crate) fn create_vertex_shader(
+    device: &Device,
+    bytecode: &[u8],
+) -> Result<crate::shader::VertexShader, GraphicsError> {
+    let mut shader: Option<ID3D11VertexShader> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateVertexShader(bytecode, None, Some(&mut shader))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let shader = shader.ok_or_else(|| {
+        GraphicsError::Backend("CreateVertexShader não retornou um shader".into())
+    })?;
+    Ok(crate::shader::VertexShader {
+        raw: shader,
+        bytecode: bytecode.to_vec(),
+    })
+}
+
+pub(crate) fn create_pixel_shader(
+    device: &Device,
+    bytecode: &[u8],
+) -> Result<crate::shader::PixelShader, GraphicsError> {
+    let mut shader: Option<ID3D11PixelShader> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreatePixelShader(bytecode, None, Some(&mut shader))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let shader = shader.ok_or_else(|| {
+        GraphicsError::Backend("CreatePixelShader não retornou um shader".into())
+    })?;
+    Ok(crate::shader::PixelShader { raw: shader })
+}
+
+pub(crate) fn create_input_layout(
+    device: &Device,
+    attributes: &[crate::input::VertexAttribute],
+    vertex_shader: &crate::shader::VertexShader,
+) -> Result<crate::input::InputLayout, GraphicsError> {
+    // Os nomes de semântica precisam ficar vivos (como C strings) durante
+    // toda a chamada a CreateInputLayout.
+    let semantic_names: Vec<std::ffi::CString> = attributes
+        .iter()
+        .map(|attr| std::ffi::CString::new(attr.semantic).expect("semântica sem bytes nulos"))
+        .collect();
+
+    let descs: Vec<D3D11_INPUT_ELEMENT_DESC> = attributes
+        .iter()
+        .zip(&semantic_names)
+        .map(|(attr, name)| {
+            let format = attr.format.to_dxgi_format().unwrap_or(DXGI_FORMAT_UNKNOWN);
+            D3D11_INPUT_ELEMENT_DESC {
+                SemanticName: PCSTR(name.as_ptr() as *const u8),
+                SemanticIndex: attr.semantic_index,
+                Format: format,
+                InputSlot: 0,
+                AlignedByteOffset: attr.offset,
+                InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+                InstanceDataStepRate: 0,
+            }
+        })
+        .collect();
+
+    let mut layout: Option<ID3D11InputLayout> = None;
+    unsafe {
+        device.raw.device.CreateInputLayout(
+            &descs,
+            &vertex_shader.bytecode,
+            Some(&mut layout),
+        )
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let layout = layout.ok_or_else(|| {
+        GraphicsError::Backend("CreateInputLayout não retornou um input layout".into())
+    })?;
+
+    Ok(crate::input::InputLayout { raw: layout })
 }
 
 pub(crate) fn surface_from_handle(

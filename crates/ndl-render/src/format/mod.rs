@@ -43,6 +43,7 @@ pub enum Format {
     R32Float,
     Rg16Float,
     Rg32Float,
+    Rgb32Float,
     Rgba16Float,
     Rgba32Float,
 
@@ -105,6 +106,7 @@ impl Format {
             | Bgra8UnormSrgb | R32Uint | R32Sint | R32Float | Rg16Float | D24UnormS8Uint
             | D32Float | Rgb10a2Unorm | Rg11b10Float | Rgb9e5SharedExp => 32,
             Rg32Float | Rgba16Float | D32FloatS8X24Uint => 64,
+            Rgb32Float => 96,
             Rgba32Uint | Rgba32Sint | Rgba32Float => 128,
             // Formatos comprimidos: "bits por pixel" não é o conceito certo;
             // use `bytes_per_block()`/`block_dimensions()` para esses.
@@ -164,7 +166,14 @@ impl Format {
         use Format::*;
         matches!(
             self,
-            R16Float | R32Float | Rg16Float | Rg32Float | Rgba16Float | Rgba32Float | D32Float
+            R16Float
+                | R32Float
+                | Rg16Float
+                | Rg32Float
+                | Rgb32Float
+                | Rgba16Float
+                | Rgba32Float
+                | D32Float
         )
     }
 }
@@ -200,6 +209,7 @@ mod dxgi {
                 R32Float => DXGI_FORMAT_R32_FLOAT,
                 Rg16Float => DXGI_FORMAT_R16G16_FLOAT,
                 Rg32Float => DXGI_FORMAT_R32G32_FLOAT,
+                Rgb32Float => DXGI_FORMAT_R32G32B32_FLOAT,
                 Rgba16Float => DXGI_FORMAT_R16G16B16A16_FLOAT,
                 Rgba32Float => DXGI_FORMAT_R32G32B32A32_FLOAT,
                 Rgba8UnormSrgb => DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
@@ -248,6 +258,7 @@ mod dxgi {
                 DXGI_FORMAT_R32_FLOAT => R32Float,
                 DXGI_FORMAT_R16G16_FLOAT => Rg16Float,
                 DXGI_FORMAT_R32G32_FLOAT => Rg32Float,
+                DXGI_FORMAT_R32G32B32_FLOAT => Rgb32Float,
                 DXGI_FORMAT_R16G16B16A16_FLOAT => Rgba16Float,
                 DXGI_FORMAT_R32G32B32A32_FLOAT => Rgba32Float,
                 DXGI_FORMAT_R8G8B8A8_UNORM_SRGB => Rgba8UnormSrgb,

@@ -46,23 +46,24 @@ cursor, monitores), com os backends `headless` e `windows` (via `winit`)
 funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
 árvore de módulos como stubs reservados para a integração real com cada SO.
 
-`ndl-render` tem a árvore de módulos inteira reservada (`command`, `queue`,
-`resource`, `memory`, `buffer`, `texture`, `shader`, `pipeline`, `input`,
-`raster`, `blend`, `depth_stencil`, `sampler`, `render`, `compute`,
-`transfer`, `query`, `sync`, `debug`), cada uma documentada com os tipos e
-métodos planejados — mas ainda sem implementação.
+`ndl-render` ainda tem módulos reservados (`command`, `queue`, `resource`,
+`memory`, `texture`, `blend`, `depth_stencil`, `sampler`, `compute`,
+`transfer`, `query`, `sync`, `debug`), documentados com os tipos e métodos
+planejados, mas sem implementação.
 
-`ndl-render::core`, `ndl-render::format`, `ndl-render::surface`,
-`ndl-render::context` e `ndl-render::view` já são **reais**:
+`ndl-render::core`, `format`, `surface`, `context`, `view`, `buffer`,
+`shader`, `input`, `pipeline`, `render` (via `Context::draw`) e `raster`
+(`Viewport`) já são **reais**: dá para compilar HLSL em runtime
+(`shader::compile_hlsl`), criar vertex/pixel shader, input layout, vertex
+buffer e um `GraphicsPipeline`, e desenhar geometria de verdade numa
+janela real — testado desenhando um triângulo colorido
+(`tests/triangle.rs`) numa janela Win32 crua, sem tocar em `ndl-platform`.
+
 `Device::new()` cria um dispositivo Direct3D 11 de verdade (via
 `backend::directx`, `windows-rs`), com `DeviceCapabilities`/`DeviceLimits`
 derivados do `FeatureLevel` obtido; `Instance::enumerate_adapters()` lista
-as GPUs do sistema via DXGI; `Format` cobre as principais famílias de pixel
-format com conversão para/do `DXGI_FORMAT` nativo; `Surface`/`Swapchain`
-conectam um `RawWindowHandle` (crate `raw-window-handle`) a uma swapchain
-real; `Context` (contexto imediato) e `RenderTargetView` (RTV) já limpam e
-apresentam quadros de verdade numa janela real, com `Swapchain::clear_and_present`
-como conveniência por cima desses três passos.
+as GPUs do sistema via DXGI; `Surface`/`Swapchain` conectam um
+`RawWindowHandle` (crate `raw-window-handle`) a uma swapchain real.
 
 **`ndl-render` nunca depende de `ndl-platform`** (nem de nenhuma outra lib
 de janela) — `Surface::from_window_handle` recebe um `RawWindowHandle`

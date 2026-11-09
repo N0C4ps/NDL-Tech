@@ -28,6 +28,9 @@
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext;
 
+use crate::buffer::Buffer;
+use crate::pipeline::GraphicsPipeline;
+use crate::raster::Viewport;
 use crate::view::RenderTargetView;
 
 /// O contexto imediato de um [`crate::core::Device`] — por onde comandos
@@ -76,5 +79,85 @@ impl Context {
         unsafe {
             self.raw.Flush();
         }
+    }
+
+    /// Define a região da superfície de destino em que a rasterização
+    /// desenha. Sem isso, nada é rasterizado mesmo com o resto do
+    /// pipeline configurado corretamente.
+    pub fn set_viewport(&self, viewport: Viewport) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            use windows::Win32::Graphics::Direct3D11::D3D11_VIEWPORT;
+            self.raw.RSSetViewports(Some(&[D3D11_VIEWPORT {
+                TopLeftX: viewport.x,
+                TopLeftY: viewport.y,
+                Width: viewport.width,
+                Height: viewport.height,
+                MinDepth: viewport.min_depth,
+                MaxDepth: viewport.max_depth,
+            }]));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = viewport;
+        }
+    }
+
+    /// Define o pipeline gráfico (shaders, input layout, topologia) a ser
+    /// usado pelos próximos `draw()`.
+    pub fn set_pipeline(&self, pipeline: &GraphicsPipeline) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.IASetInputLayout(&pipeline.input_layout);
+            self.raw.VSSetShader(&pipeline.vertex_shader, None);
+            self.raw.PSSetShader(&pipeline.pixel_shader, None);
+            self.raw.IASetPrimitiveTopology(topology_to_d3d(pipeline.primitive_topology));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = pipeline;
+        }
+    }
+
+    /// Vincula `buffer` ao slot `slot` de vertex buffer, com o `stride`
+    /// (tamanho de um vértice, em bytes) dado.
+    pub fn set_vertex_buffer(&self, slot: u32, buffer: &Buffer, stride: u32) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.IASetVertexBuffers(
+                slot,
+                1,
+                Some(&Some(buffer.raw.clone())),
+                Some(&stride),
+                Some(&0),
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (slot, buffer, stride);
+        }
+    }
+
+    /// Desenha `vertex_count` vértices a partir de `first_vertex`, usando
+    /// o pipeline e os vertex buffers vinculados atualmente.
+    pub fn draw(&self, vertex_count: u32, first_vertex: u32) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.Draw(vertex_count, first_vertex);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (vertex_count, first_vertex);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn topology_to_d3d(
+    topology: crate::input::PrimitiveTopology,
+) -> windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY {
+    use windows::Win32::Graphics::Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    match topology {
+        crate::input::PrimitiveTopology::TriangleList => D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
     }
 }
