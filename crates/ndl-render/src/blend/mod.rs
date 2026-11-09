@@ -1,43 +1,104 @@
-//! Mistura de cores (blending) e operações lógicas.
+//! Mistura de cores (blending).
 //!
-//! A equação geral de blending de cor, nas operações aditivas, é
-//! `C_out = C_src * F_src + C_dst * F_dst`; outras operações substituem a
-//! soma por subtração, mínimo ou máximo.
+//! A equação geral é `C_out = C_src * F_src + C_dst * F_dst`. Essencial
+//! para transparência (vidro, partículas, UI com alpha) — sem um
+//! [`BlendState`] habilitado, tudo que é desenhado substitui o que já
+//! estava lá, mesmo com alpha menor que 1.
 //!
-//! ## Planejado
+//! ## Estado atual
 //!
-//! `BlendOp`: Add, Subtract, ReverseSubtract, Min, Max.
-//!
-//! ```ignore
-//! pub enum BlendFactor {
-//!     Zero, One,
-//!     SrcColor, OneMinusSrcColor, DstColor, OneMinusDstColor,
-//!     SrcAlpha, OneMinusSrcAlpha, DstAlpha, OneMinusDstAlpha,
-//!     SrcAlphaSaturated,
-//!     ConstantColor, OneMinusConstantColor,
-//!     Src1Color, OneMinusSrc1Color, Src1Alpha, OneMinusSrc1Alpha,
-//! }
-//! ```
-//!
-//! `ConstantColor`/`OneMinusConstantColor` representam, nesta API, o fator
-//! de blend configurado pelo aplicativo — o D3D11 usa `BLEND_FACTOR` e
-//! `INV_BLEND_FACTOR`.
-//!
-//! Métodos: `create_blend_state()`, `set_blend_state()`,
-//! `get_blend_state()`, `set_blend_constant()`, `get_blend_constant()`,
-//! `set_sample_mask()`, `set_alpha_to_coverage()`,
-//! `set_independent_blending()`, `set_color_write_mask()`.
-//!
-//! Builders/presets planejados: `BlendState::opaque()`,
-//! `alpha_blend()`, `premultiplied_alpha()`, `additive()`,
-//! `subtractive()`, `multiply()`, `screen()`, `min()`, `max()`,
-//! `disabled()` — `multiply()`/`screen()` são presets expressos com
-//! fatores adequados, não novos `BlendOp` nativos.
-//!
-//! `ColorWriteMask`: RED, GREEN, BLUE, ALPHA, RGB, ALL, NONE.
-//!
-//! `LogicOp` (hardware/feature level compatíveis, distinto do blending
-//! aritmético): Clear, Set, Copy, CopyInverted, Noop, Invert, And, Nand,
-//! Or, Nor, Xor, Equiv, AndReverse, AndInverted, OrReverse, OrInverted.
-//!
-//! Ainda não implementado.
+//! [`BlendState`] já é real, com os dois presets mais comuns
+//! (`opaque`/`alpha_blend`). Operações lógicas (`LogicOp`), máscara de
+//! escrita de cor e blending independente por render target continuam
+//! reservados.
+
+use crate::core::{Device, GraphicsError};
+
+/// Fator multiplicado pela cor de origem/destino na equação de blend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlendFactor {
+    Zero,
+    One,
+    SrcColor,
+    OneMinusSrcColor,
+    DstColor,
+    OneMinusDstColor,
+    SrcAlpha,
+    OneMinusSrcAlpha,
+    DstAlpha,
+    OneMinusDstAlpha,
+}
+
+/// Como os fatores de origem/destino são combinados.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlendOp {
+    #[default]
+    Add,
+    Subtract,
+    ReverseSubtract,
+    Min,
+    Max,
+}
+
+/// Configuração usada para criar um [`BlendState`].
+#[derive(Debug, Clone, Copy)]
+pub struct BlendStateDescriptor {
+    pub enabled: bool,
+    pub src_factor: BlendFactor,
+    pub dst_factor: BlendFactor,
+    pub op: BlendOp,
+}
+
+impl BlendStateDescriptor {
+    /// Sem blending — o padrão do D3D11. O que é desenhado substitui o
+    /// que já estava no alvo, ignorando o canal alpha.
+    pub const fn opaque() -> Self {
+        Self {
+            enabled: false,
+            src_factor: BlendFactor::One,
+            dst_factor: BlendFactor::Zero,
+            op: BlendOp::Add,
+        }
+    }
+
+    /// Alpha blending convencional: `cor_final = src.a * src + (1 - src.a) * dst`.
+    pub const fn alpha_blend() -> Self {
+        Self {
+            enabled: true,
+            src_factor: BlendFactor::SrcAlpha,
+            dst_factor: BlendFactor::OneMinusSrcAlpha,
+            op: BlendOp::Add,
+        }
+    }
+}
+
+impl Default for BlendStateDescriptor {
+    fn default() -> Self {
+        Self::opaque()
+    }
+}
+
+/// Um estado de blending já criado no dispositivo.
+pub struct BlendState {
+    #[cfg(target_os = "windows")]
+    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11BlendState,
+}
+
+impl Device {
+    pub fn create_blend_state(
+        &self,
+        desc: &BlendStateDescriptor,
+    ) -> Result<BlendState, GraphicsError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::backend::directx::create_blend_state(self, desc);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = desc;
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+}

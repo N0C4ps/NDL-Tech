@@ -46,7 +46,8 @@ impl Context {
         Self { raw }
     }
 
-    /// Define `view` como o único alvo de renderização atual.
+    /// Define `view` como o único alvo de renderização atual, sem depth
+    /// buffer — use [`Context::set_render_target_with_depth`] para 3D.
     ///
     /// Múltiplos alvos simultâneos (MRT) ainda não são suportados — isso
     /// entra quando `view`/`texture` tiverem mais do que `RenderTargetView`.
@@ -58,6 +59,68 @@ impl Context {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = view;
+        }
+    }
+
+    /// Define `view` como alvo de renderização e `depth` como o depth
+    /// buffer usado pelo teste/escrita de profundidade — o caminho normal
+    /// para desenhar geometria 3D.
+    pub fn set_render_target_with_depth(
+        &self,
+        view: &RenderTargetView,
+        depth: &crate::view::DepthStencilView,
+    ) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw
+                .OMSetRenderTargets(Some(&[Some(view.raw.clone())]), Some(&depth.raw));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (view, depth);
+        }
+    }
+
+    /// Limpa `view` (um depth buffer) com o valor de profundidade dado
+    /// (normalmente `1.0`, o mais longe possível).
+    pub fn clear_depth(&self, view: &crate::view::DepthStencilView, depth: f32) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.ClearDepthStencilView(
+                &view.raw,
+                windows::Win32::Graphics::Direct3D11::D3D11_CLEAR_DEPTH.0 as u32,
+                depth,
+                0,
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (view, depth);
+        }
+    }
+
+    /// Define o estado de teste/escrita de profundidade usado pelos
+    /// próximos `draw()`.
+    pub fn set_depth_stencil_state(&self, state: &crate::depth_stencil::DepthStencilState) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.OMSetDepthStencilState(&state.raw, 0);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = state;
+        }
+    }
+
+    /// Define o estado de blending usado pelos próximos `draw()`.
+    pub fn set_blend_state(&self, state: &crate::blend::BlendState) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.OMSetBlendState(&state.raw, Some(&[1.0, 1.0, 1.0, 1.0]), 0xffffffff);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = state;
         }
     }
 
@@ -135,6 +198,38 @@ impl Context {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (slot, buffer, stride);
+        }
+    }
+
+    /// Vincula `buffer` como o index buffer atual, no formato `format`.
+    pub fn set_index_buffer(&self, buffer: &Buffer, format: crate::input::IndexFormat) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R32_UINT};
+            let dxgi_format = match format {
+                crate::input::IndexFormat::Uint16 => DXGI_FORMAT_R16_UINT,
+                crate::input::IndexFormat::Uint32 => DXGI_FORMAT_R32_UINT,
+            };
+            self.raw.IASetIndexBuffer(&buffer.raw, dxgi_format, 0);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (buffer, format);
+        }
+    }
+
+    /// Desenha `index_count` índices a partir de `first_index`, somando
+    /// `base_vertex` a cada índice antes de buscar o vértice correspondente
+    /// — usa o pipeline, os vertex buffers e o index buffer vinculados
+    /// atualmente.
+    pub fn draw_indexed(&self, index_count: u32, first_index: u32, base_vertex: i32) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.DrawIndexed(index_count, first_index, base_vertex);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (index_count, first_index, base_vertex);
         }
     }
 

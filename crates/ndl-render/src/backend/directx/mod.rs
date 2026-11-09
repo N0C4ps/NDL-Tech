@@ -13,16 +13,21 @@ use windows::Win32::Graphics::Direct3D::{
 use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout,
+    D3D11CreateDevice, ID3D11Buffer, ID3D11Device, ID3D11DepthStencilState,
+    ID3D11DepthStencilView, ID3D11DeviceContext, ID3D11InputLayout,
     ID3D11PixelShader, ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView,
-    ID3D11Texture2D, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_FLAG,
-    D3D11_BIND_INDEX_BUFFER, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_VERTEX_BUFFER,
-    D3D11_BUFFER_DESC, D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-    D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_FLAG, D3D11_FILTER_MIN_MAG_MIP_LINEAR,
-    D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA,
-    D3D11_SAMPLER_DESC, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
-    D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_MIRROR, D3D11_TEXTURE_ADDRESS_WRAP,
-    D3D11_USAGE_DEFAULT, D3D11_USAGE_DYNAMIC,
+    ID3D11Texture2D, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_DEPTH_STENCIL,
+    D3D11_BIND_FLAG, D3D11_BIND_INDEX_BUFFER, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_VERTEX_BUFFER,
+    D3D11_BUFFER_DESC, D3D11_COMPARISON_ALWAYS, D3D11_COMPARISON_EQUAL, D3D11_COMPARISON_FUNC,
+    D3D11_COMPARISON_GREATER, D3D11_COMPARISON_GREATER_EQUAL, D3D11_COMPARISON_LESS,
+    D3D11_COMPARISON_LESS_EQUAL, D3D11_COMPARISON_NEVER, D3D11_COMPARISON_NOT_EQUAL,
+    D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_DEBUG,
+    D3D11_CREATE_DEVICE_FLAG, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_WRITE_MASK_ALL,
+    D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT,
+    D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_SAMPLER_DESC, D3D11_SDK_VERSION,
+    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_TEXTURE_ADDRESS_CLAMP,
+    D3D11_TEXTURE_ADDRESS_MIRROR, D3D11_TEXTURE_ADDRESS_WRAP, D3D11_USAGE_DEFAULT,
+    D3D11_USAGE_DYNAMIC,
 };
 use windows::core::PCSTR;
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -349,6 +354,175 @@ pub(crate) fn create_input_layout(
     })?;
 
     Ok(crate::input::InputLayout { raw: layout })
+}
+
+fn blend_factor_to_d3d(
+    factor: crate::blend::BlendFactor,
+) -> windows::Win32::Graphics::Direct3D11::D3D11_BLEND {
+    use crate::blend::BlendFactor::*;
+    use windows::Win32::Graphics::Direct3D11::*;
+    match factor {
+        Zero => D3D11_BLEND_ZERO,
+        One => D3D11_BLEND_ONE,
+        SrcColor => D3D11_BLEND_SRC_COLOR,
+        OneMinusSrcColor => D3D11_BLEND_INV_SRC_COLOR,
+        DstColor => D3D11_BLEND_DEST_COLOR,
+        OneMinusDstColor => D3D11_BLEND_INV_DEST_COLOR,
+        SrcAlpha => D3D11_BLEND_SRC_ALPHA,
+        OneMinusSrcAlpha => D3D11_BLEND_INV_SRC_ALPHA,
+        DstAlpha => D3D11_BLEND_DEST_ALPHA,
+        OneMinusDstAlpha => D3D11_BLEND_INV_DEST_ALPHA,
+    }
+}
+
+fn blend_op_to_d3d(
+    op: crate::blend::BlendOp,
+) -> windows::Win32::Graphics::Direct3D11::D3D11_BLEND_OP {
+    use crate::blend::BlendOp::*;
+    use windows::Win32::Graphics::Direct3D11::*;
+    match op {
+        Add => D3D11_BLEND_OP_ADD,
+        Subtract => D3D11_BLEND_OP_SUBTRACT,
+        ReverseSubtract => D3D11_BLEND_OP_REV_SUBTRACT,
+        Min => D3D11_BLEND_OP_MIN,
+        Max => D3D11_BLEND_OP_MAX,
+    }
+}
+
+pub(crate) fn create_blend_state(
+    device: &Device,
+    desc: &crate::blend::BlendStateDescriptor,
+) -> Result<crate::blend::BlendState, GraphicsError> {
+    use windows::Win32::Graphics::Direct3D11::{
+        D3D11_BLEND_DESC, D3D11_COLOR_WRITE_ENABLE_ALL, D3D11_RENDER_TARGET_BLEND_DESC,
+    };
+
+    let render_target = D3D11_RENDER_TARGET_BLEND_DESC {
+        BlendEnable: desc.enabled.into(),
+        SrcBlend: blend_factor_to_d3d(desc.src_factor),
+        DestBlend: blend_factor_to_d3d(desc.dst_factor),
+        BlendOp: blend_op_to_d3d(desc.op),
+        SrcBlendAlpha: blend_factor_to_d3d(desc.src_factor),
+        DestBlendAlpha: blend_factor_to_d3d(desc.dst_factor),
+        BlendOpAlpha: blend_op_to_d3d(desc.op),
+        RenderTargetWriteMask: D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
+    };
+
+    let mut blend_desc = D3D11_BLEND_DESC::default();
+    blend_desc.RenderTarget[0] = render_target;
+
+    let mut state: Option<windows::Win32::Graphics::Direct3D11::ID3D11BlendState> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateBlendState(&blend_desc, Some(&mut state))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let state = state
+        .ok_or_else(|| GraphicsError::Backend("CreateBlendState não retornou um estado".into()))?;
+
+    Ok(crate::blend::BlendState { raw: state })
+}
+
+fn compare_op_to_d3d(op: crate::depth_stencil::CompareOp) -> D3D11_COMPARISON_FUNC {
+    use crate::depth_stencil::CompareOp::*;
+    match op {
+        Never => D3D11_COMPARISON_NEVER,
+        Less => D3D11_COMPARISON_LESS,
+        Equal => D3D11_COMPARISON_EQUAL,
+        LessEqual => D3D11_COMPARISON_LESS_EQUAL,
+        Greater => D3D11_COMPARISON_GREATER,
+        NotEqual => D3D11_COMPARISON_NOT_EQUAL,
+        GreaterEqual => D3D11_COMPARISON_GREATER_EQUAL,
+        Always => D3D11_COMPARISON_ALWAYS,
+    }
+}
+
+pub(crate) fn create_depth_stencil_state(
+    device: &Device,
+    desc: &crate::depth_stencil::DepthStencilStateDescriptor,
+) -> Result<crate::depth_stencil::DepthStencilState, GraphicsError> {
+    let state_desc = D3D11_DEPTH_STENCIL_DESC {
+        DepthEnable: desc.depth_test_enabled.into(),
+        DepthWriteMask: if desc.depth_write_enabled {
+            D3D11_DEPTH_WRITE_MASK_ALL
+        } else {
+            D3D11_DEPTH_WRITE_MASK_ZERO
+        },
+        DepthFunc: compare_op_to_d3d(desc.depth_compare),
+        StencilEnable: false.into(),
+        ..Default::default()
+    };
+
+    let mut state: Option<ID3D11DepthStencilState> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateDepthStencilState(&state_desc, Some(&mut state))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let state = state.ok_or_else(|| {
+        GraphicsError::Backend("CreateDepthStencilState não retornou um estado".into())
+    })?;
+
+    Ok(crate::depth_stencil::DepthStencilState { raw: state })
+}
+
+pub(crate) fn create_depth_stencil_view(
+    device: &Device,
+    width: u32,
+    height: u32,
+    format: crate::format::Format,
+) -> Result<crate::view::DepthStencilView, GraphicsError> {
+    let dxgi_format = format
+        .to_dxgi_format()
+        .ok_or(GraphicsError::Unsupported("formato não suportado para depth buffer"))?;
+
+    let texture_desc = D3D11_TEXTURE2D_DESC {
+        Width: width,
+        Height: height,
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: dxgi_format,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: D3D11_USAGE_DEFAULT,
+        BindFlags: D3D11_BIND_DEPTH_STENCIL.0 as u32,
+        CPUAccessFlags: 0,
+        MiscFlags: 0,
+    };
+
+    let mut texture: Option<ID3D11Texture2D> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateTexture2D(&texture_desc, None, Some(&mut texture))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let texture = texture.ok_or_else(|| {
+        GraphicsError::Backend("CreateTexture2D (depth) não retornou uma textura".into())
+    })?;
+
+    let mut view: Option<ID3D11DepthStencilView> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateDepthStencilView(&texture, None, Some(&mut view))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let view = view.ok_or_else(|| {
+        GraphicsError::Backend("CreateDepthStencilView não retornou uma view".into())
+    })?;
+
+    Ok(crate::view::DepthStencilView::from_raw(view))
 }
 
 pub(crate) fn create_texture_2d(

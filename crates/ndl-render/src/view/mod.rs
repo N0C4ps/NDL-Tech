@@ -6,9 +6,9 @@
 //!
 //! ## Estado atual
 //!
-//! [`RenderTargetView`] (RTV) e [`ShaderResourceView`] (SRV) já são
-//! reais. `DepthStencilView` e `UnorderedAccessView` ainda não existem;
-//! entram quando `depth_stencil`/`compute` forem implementados de verdade.
+//! [`RenderTargetView`] (RTV), [`ShaderResourceView`] (SRV) e
+//! [`DepthStencilView`] (DSV) já são reais. `UnorderedAccessView` ainda
+//! não existe; entra quando `compute` for implementado de verdade.
 //!
 //! Métodos de conveniência planejados para todas as views: `resource()`,
 //! `descriptor()`, `format()`, `dimension()`, `mip_range()`,
@@ -42,6 +42,22 @@ impl ShaderResourceView {
     #[cfg(target_os = "windows")]
     pub(crate) fn from_raw(
         raw: windows::Win32::Graphics::Direct3D11::ID3D11ShaderResourceView,
+    ) -> Self {
+        Self { raw }
+    }
+}
+
+/// Uma visualização de profundidade/stencil — o que permite a um
+/// contexto testar/escrever profundidade durante o desenho.
+pub struct DepthStencilView {
+    #[cfg(target_os = "windows")]
+    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11DepthStencilView,
+}
+
+impl DepthStencilView {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn from_raw(
+        raw: windows::Win32::Graphics::Direct3D11::ID3D11DepthStencilView,
     ) -> Self {
         Self { raw }
     }

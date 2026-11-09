@@ -6,9 +6,10 @@
 //!
 //! ## Estado atual
 //!
-//! [`VertexAttribute`], [`InputLayout`] e [`PrimitiveTopology`] (só
-//! `TriangleList` por enquanto) já são reais. O resto das topologias e os
-//! builders de `VertexBufferLayout` continuam reservados.
+//! [`VertexAttribute`], [`InputLayout`], [`PrimitiveTopology`] (só
+//! `TriangleList` por enquanto) e [`IndexFormat`] já são reais. O resto
+//! das topologias e os builders de `VertexBufferLayout` continuam
+//! reservados.
 
 use crate::core::{Device, GraphicsError};
 use crate::format::Format;
@@ -21,6 +22,13 @@ pub enum PrimitiveTopology {
     TriangleList,
     // TODO: PointList, LineList, LineStrip, TriangleStrip, *Adjacency,
     // PatchList(u8) — adicionados conforme forem usados de verdade.
+}
+
+/// O tipo de cada índice num index buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexFormat {
+    Uint16,
+    Uint32,
 }
 
 /// Um atributo de vértice: onde ele fica no buffer e o que o shader espera
