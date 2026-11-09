@@ -15,8 +15,9 @@ mod error;
 mod instance;
 
 /// Acesso nativo opcional ao Direct3D 11. Esta extensao nao faz parte do
-/// contrato portavel de `Device` e so existe em builds para Windows.
-#[cfg(target_os = "windows")]
+/// contrato portavel de `Device` e so existe quando o backend DirectX 11
+/// está ativo (feature `backend-directx11`).
+#[cfg(feature = "backend-directx11")]
 pub mod d3d11;
 
 pub use adapter::{AdapterInfo, AdapterType};

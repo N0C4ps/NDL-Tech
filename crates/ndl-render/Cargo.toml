@@ -6,6 +6,15 @@ license.workspace = true
 repository.workspace = true
 description = "Abstrações de renderização do ecossistema NDL sobre backends gráficos (Direct3D 11, depois outros)."
 
+[features]
+# O backend ativo é escolhido em tempo de compilação — exatamente um
+# backend de API gráfica por build, nunca os dois ao mesmo tempo. Isso é
+# o que permite `backend::ActiveBackend` (ver `src/backend/mod.rs`)
+# resolver pra um tipo concreto sem `dyn`/vtable nenhum. Reservado:
+# "backend-directx12", "backend-vulkan", seguindo o mesmo padrão.
+default = ["backend-directx11"]
+backend-directx11 = []
+
 [dependencies]
 # Handle de janela genérico e multiplataforma — ndl-render nunca depende de
 # ndl-platform (ou de qualquer outra lib de janela) diretamente; a conexão

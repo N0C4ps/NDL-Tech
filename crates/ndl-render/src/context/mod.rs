@@ -16,6 +16,12 @@
 //! escape hatch podem invalidar esse rastreamento; nesse caso, as validações
 //! dependentes dele não garantem o estado real do driver.
 //!
+//! Nenhuma chamada nativa aparece neste módulo — toda operação concreta
+//! (`Draw`, `OMSetRenderTargets`, ...) vive atrás de [`crate::backend::Backend`],
+//! implementado por cada backend em `crate::backend::<nome>`. Isso é o que
+//! torna este módulo (e os outros do nível público da crate) igual para
+//! qualquer backend ativo.
+//!
 //! ## Estado atual
 //!
 //! [`Context`] oferece comandos de baixo nivel; [`crate::render::RenderPass`]
@@ -49,9 +55,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-#[cfg(target_os = "windows")]
-use windows::Win32::Graphics::Direct3D11::{ID3D11DeviceContext, ID3D11RenderTargetView};
-
+use crate::backend::{ActiveBackend, Backend};
 use crate::buffer::Buffer;
 use crate::core::DeviceLimits;
 use crate::pipeline::GraphicsPipeline;
@@ -65,8 +69,7 @@ pub(crate) type ContextLock = Arc<Mutex<()>>;
 /// O contexto imediato de um [`crate::core::Device`] — por onde comandos
 /// de limpeza/desenho são de fato submetidos à GPU.
 pub struct Context {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: ID3D11DeviceContext,
+    pub(crate) raw: <ActiveBackend as Backend>::RawContext,
     bound_index_buffer: std::sync::Arc<std::sync::Mutex<Option<(u64, crate::input::IndexFormat)>>>,
     bound_vertex_buffers: VertexBufferBindings,
     context_lock: ContextLock,
@@ -78,8 +81,10 @@ impl Context {
         self.limits
     }
 
-    #[cfg(target_os = "windows")]
-    pub(crate) fn from_raw(raw: ID3D11DeviceContext, limits: DeviceLimits) -> Self {
+    /// Contexto novo, com estado de bindings próprio (não compartilhado
+    /// com o contexto imediato) — usado por
+    /// [`crate::command::CommandEncoder`] para o contexto diferido.
+    pub(crate) fn from_raw(raw: <ActiveBackend as Backend>::RawContext, limits: DeviceLimits) -> Self {
         Self::from_raw_with_shared(
             raw,
             std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -89,9 +94,8 @@ impl Context {
         )
     }
 
-    #[cfg(target_os = "windows")]
     pub(crate) fn from_raw_with_shared(
-        raw: ID3D11DeviceContext,
+        raw: <ActiveBackend as Backend>::RawContext,
         bound_index_buffer: std::sync::Arc<
             std::sync::Mutex<Option<(u64, crate::input::IndexFormat)>>,
         >,
@@ -120,15 +124,7 @@ impl Context {
     /// cor simultâneo (MRT).
     pub fn set_render_target(&self, view: &RenderTargetView) {
         let _guard = self.lock_context();
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .OMSetRenderTargets(Some(&[Some(view.raw.clone())]), None);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = view;
-        }
+        ActiveBackend::set_render_target(self, view);
     }
 
     /// Define `view` como alvo de renderização e `depth` como o depth
@@ -141,15 +137,7 @@ impl Context {
         depth: &crate::view::DepthStencilView,
     ) {
         let _guard = self.lock_context();
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .OMSetRenderTargets(Some(&[Some(view.raw.clone())]), Some(&depth.raw));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (view, depth);
-        }
+        ActiveBackend::set_render_target_with_depth(self, view, depth);
     }
 
     /// Define `views` (1 a [`crate::core::DeviceLimits::max_color_attachments`])
@@ -164,16 +152,7 @@ impl Context {
     ) -> Result<(), crate::core::GraphicsError> {
         let _guard = self.lock_context();
         validate_render_target_count(views.len(), self.limits.max_color_attachments)?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            let raw_views: Vec<Option<ID3D11RenderTargetView>> =
-                views.iter().map(|view| Some(view.raw.clone())).collect();
-            self.raw.OMSetRenderTargets(Some(&raw_views), None);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = views;
-        }
+        ActiveBackend::set_render_targets(self, views);
         Ok(())
     }
 
@@ -188,17 +167,7 @@ impl Context {
     ) -> Result<(), crate::core::GraphicsError> {
         let _guard = self.lock_context();
         validate_render_target_count(views.len(), self.limits.max_color_attachments)?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            let raw_views: Vec<Option<ID3D11RenderTargetView>> =
-                views.iter().map(|view| Some(view.raw.clone())).collect();
-            self.raw
-                .OMSetRenderTargets(Some(&raw_views), Some(&depth.raw));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (views, depth);
-        }
+        ActiveBackend::set_render_targets_with_depth(self, views, depth);
         Ok(())
     }
 
@@ -211,19 +180,7 @@ impl Context {
     ) -> Result<(), crate::core::GraphicsError> {
         let _guard = self.lock_context();
         validate_depth_value(depth)?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.ClearDepthStencilView(
-                &view.raw,
-                windows::Win32::Graphics::Direct3D11::D3D11_CLEAR_DEPTH.0 as u32,
-                depth,
-                0,
-            );
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (view, depth);
-        }
+        ActiveBackend::clear_depth(self, view, depth);
         Ok(())
     }
 
@@ -231,50 +188,25 @@ impl Context {
     /// próximos `draw()`.
     pub fn set_depth_stencil_state(&self, state: &crate::depth_stencil::DepthStencilState) {
         let _guard = self.lock_context();
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.OMSetDepthStencilState(&state.raw, 0);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = state;
-        }
+        ActiveBackend::set_depth_stencil_state(self, state);
     }
 
     /// Define o estado de blending usado pelos próximos `draw()`.
     pub fn set_blend_state(&self, state: &crate::blend::BlendState) {
         let _guard = self.lock_context();
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .OMSetBlendState(&state.raw, Some(&[1.0, 1.0, 1.0, 1.0]), 0xffffffff);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = state;
-        }
+        ActiveBackend::set_blend_state(self, state);
     }
 
     /// Limpa `view` inteira com a cor dada (RGBA, 0.0–1.0).
     pub fn clear_render_target(&self, view: &RenderTargetView, color: [f32; 4]) {
         let _guard = self.lock_context();
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.ClearRenderTargetView(&view.raw, &color);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (view, color);
-        }
+        ActiveBackend::clear_render_target(self, view, color);
     }
 
     /// Força o envio de qualquer comando ainda pendente no contexto para a GPU.
     pub fn flush(&self) {
         let _guard = self.lock_context();
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.Flush();
-        }
+        ActiveBackend::flush(self);
     }
 
     /// Define a região da superfície de destino em que a rasterização
@@ -283,22 +215,7 @@ impl Context {
     pub fn set_viewport(&self, viewport: Viewport) -> Result<(), crate::core::GraphicsError> {
         let _guard = self.lock_context();
         validate_viewport(viewport, self.limits.max_viewport_dimension)?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            use windows::Win32::Graphics::Direct3D11::D3D11_VIEWPORT;
-            self.raw.RSSetViewports(Some(&[D3D11_VIEWPORT {
-                TopLeftX: viewport.x,
-                TopLeftY: viewport.y,
-                Width: viewport.width,
-                Height: viewport.height,
-                MinDepth: viewport.min_depth,
-                MaxDepth: viewport.max_depth,
-            }]));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = viewport;
-        }
+        ActiveBackend::set_viewport(self, viewport);
         Ok(())
     }
 
@@ -306,26 +223,7 @@ impl Context {
     /// usado pelos próximos `draw()`.
     pub fn set_pipeline(&self, pipeline: &GraphicsPipeline) {
         let _guard = self.lock_context();
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.RSSetState(&pipeline.rasterizer_state);
-            self.raw.OMSetBlendState(
-                &pipeline.blend_state,
-                Some(&[1.0, 1.0, 1.0, 1.0]),
-                0xffffffff,
-            );
-            self.raw
-                .OMSetDepthStencilState(&pipeline.depth_stencil_state, pipeline.stencil_reference);
-            self.raw.IASetInputLayout(&pipeline.input_layout);
-            self.raw.VSSetShader(&pipeline.vertex_shader, None);
-            self.raw.PSSetShader(&pipeline.pixel_shader, None);
-            self.raw
-                .IASetPrimitiveTopology(topology_to_d3d(pipeline.primitive_topology));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = pipeline;
-        }
+        ActiveBackend::set_pipeline(self, pipeline);
     }
 
     /// Vincula `buffer` ao slot `slot` de vertex buffer, com o `stride`
@@ -360,20 +258,7 @@ impl Context {
                 ),
             });
         }
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.IASetVertexBuffers(
-                slot,
-                1,
-                Some(&Some(buffer.raw.clone())),
-                Some(&stride),
-                Some(&0),
-            );
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (slot, buffer, stride);
-        }
+        ActiveBackend::set_vertex_buffer(self, slot, buffer, stride);
         self.bound_vertex_buffers
             .lock()
             .map_err(|_| {
@@ -410,21 +295,7 @@ impl Context {
                 ),
             });
         }
-        #[cfg(target_os = "windows")]
-        unsafe {
-            use windows::Win32::Graphics::Dxgi::Common::{
-                DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R32_UINT,
-            };
-            let dxgi_format = match format {
-                crate::input::IndexFormat::Uint16 => DXGI_FORMAT_R16_UINT,
-                crate::input::IndexFormat::Uint32 => DXGI_FORMAT_R32_UINT,
-            };
-            self.raw.IASetIndexBuffer(&buffer.raw, dxgi_format, 0);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (buffer, format);
-        }
+        ActiveBackend::set_index_buffer(self, buffer, format);
         *self.bound_index_buffer.lock().map_err(|_| {
             crate::core::GraphicsError::Backend("estado interno do contexto envenenado".into())
         })? = Some((buffer.size(), format));
@@ -489,14 +360,7 @@ impl Context {
     ) -> Result<(), crate::core::GraphicsError> {
         let _guard = self.lock_context();
         self.check_index_range(index_count, first_index)?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.DrawIndexed(index_count, first_index, base_vertex);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (index_count, first_index, base_vertex);
-        }
+        ActiveBackend::draw_indexed(self, index_count, first_index, base_vertex);
         Ok(())
     }
 
@@ -528,20 +392,14 @@ impl Context {
                 name: "draw_indexed_instanced instance range",
                 reason: "first_instance + instance_count excede u32::MAX".into(),
             })?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.DrawIndexedInstanced(
-                index_count,
-                instance_count,
-                first_index,
-                base_vertex,
-                first_instance,
-            );
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (index_count, instance_count, first_index, base_vertex, first_instance);
-        }
+        ActiveBackend::draw_indexed_instanced(
+            self,
+            index_count,
+            instance_count,
+            first_index,
+            base_vertex,
+            first_instance,
+        );
         Ok(())
     }
 
@@ -571,15 +429,7 @@ impl Context {
             crate::buffer::DrawIndexedIndirectArgs::SIZE,
             "draw_indexed_indirect",
         )?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .DrawIndexedInstancedIndirect(&args_buffer.raw, args_offset as u32);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (args_buffer, args_offset);
-        }
+        ActiveBackend::draw_indexed_indirect(self, args_buffer, args_offset);
         Ok(())
     }
 
@@ -643,14 +493,7 @@ impl Context {
             return Ok(());
         }
         self.check_vertex_range(vertex_count, first_vertex)?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw.Draw(vertex_count, first_vertex);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (vertex_count, first_vertex);
-        }
+        ActiveBackend::draw(self, vertex_count, first_vertex);
         Ok(())
     }
 
@@ -678,15 +521,7 @@ impl Context {
                 name: "draw_instanced instance range",
                 reason: "first_instance + instance_count excede u32::MAX".into(),
             })?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .DrawInstanced(vertex_count, instance_count, first_vertex, first_instance);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (vertex_count, instance_count, first_vertex, first_instance);
-        }
+        ActiveBackend::draw_instanced(self, vertex_count, instance_count, first_vertex, first_instance);
         Ok(())
     }
 
@@ -711,15 +546,7 @@ impl Context {
             crate::buffer::DrawIndirectArgs::SIZE,
             "draw_indirect",
         )?;
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .DrawInstancedIndirect(&args_buffer.raw, args_offset as u32);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (args_buffer, args_offset);
-        }
+        ActiveBackend::draw_indirect(self, args_buffer, args_offset);
         Ok(())
     }
 
@@ -745,16 +572,7 @@ impl Context {
                 reason: "o buffer precisa ter BufferUsage::Constant".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        unsafe {
-            let slice = Some(&[Some(buffer.raw.clone())][..]);
-            self.raw.VSSetConstantBuffers(slot, slice);
-            self.raw.PSSetConstantBuffers(slot, slice);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (slot, buffer);
-        }
+        ActiveBackend::set_constant_buffer(self, slot, buffer);
         Ok(())
     }
 
@@ -773,15 +591,7 @@ impl Context {
                 limit: self.limits.max_sampled_resource_bindings as u64,
             });
         }
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .PSSetShaderResources(slot, Some(&[Some(view.raw.clone())]));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (slot, view);
-        }
+        ActiveBackend::set_shader_resource(self, slot, view);
         Ok(())
     }
 
@@ -800,15 +610,7 @@ impl Context {
                 limit: self.limits.max_sampler_bindings as u64,
             });
         }
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .PSSetSamplers(slot, Some(&[Some(sampler.raw.clone())]));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (slot, sampler);
-        }
+        ActiveBackend::set_sampler(self, slot, sampler);
         Ok(())
     }
 
@@ -842,15 +644,7 @@ impl Context {
                 reason: "buffers dynamic devem ser atualizados com map_write_discard".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        unsafe {
-            self.raw
-                .UpdateSubresource(&buffer.raw, 0, None, data.as_ptr() as *const _, 0, 0);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (buffer, data);
-        }
+        ActiveBackend::update_buffer(self, buffer, data);
         Ok(())
     }
 }
@@ -924,14 +718,4 @@ fn validate_depth_value(depth: f32) -> Result<(), crate::core::GraphicsError> {
         });
     }
     Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn topology_to_d3d(
-    topology: crate::input::PrimitiveTopology,
-) -> windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY {
-    use windows::Win32::Graphics::Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-    match topology {
-        crate::input::PrimitiveTopology::TriangleList => D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-    }
 }

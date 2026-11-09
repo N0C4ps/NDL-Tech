@@ -1688,3 +1688,719 @@ pub(crate) fn present(
 // set_multithread_protected(), get_multithread_protected() — o contexto
 // imediato exige cuidado especial com acesso concorrente.
 // ---------------------------------------------------------------------
+
+// =======================================================================
+// impl Backend for DirectX11 — o contrato único que o resto da crate usa
+// (ver `crate::backend::Backend`). Os métodos abaixo ou delegam direto
+// pras funções livres acima (criação de recursos — já existiam antes
+// desta rodada, lógica inalterada), ou contêm a lógica que antes ficava
+// inline em `context`/`compute`/`transfer`/`texture`/`query`, movida pra
+// cá sem mudar o que cada chamada D3D11 faz.
+// =======================================================================
+
+use crate::blend::{BlendState, BlendStateDescriptor};
+use crate::buffer::Buffer;
+use crate::command::{CommandBuffer, CommandEncoder};
+use crate::context::Context;
+use crate::core::FormatFeatures;
+use crate::depth_stencil::{DepthStencilState, DepthStencilStateDescriptor};
+use crate::input::IndexFormat;
+use crate::pipeline::{ComputePipeline, GraphicsPipeline};
+use crate::query::{Query, QueryType};
+use crate::raster::{RasterizerState, RasterizerStateDescriptor, Viewport};
+use crate::sampler::{Sampler, SamplerDescriptor};
+use crate::shader::{ComputeShader, PixelShader, VertexShader};
+use crate::texture::TextureDescriptor;
+use crate::view::{DepthStencilView, RenderTargetView, ShaderResourceView, UnorderedAccessView};
+
+/// Marcador de tipo do backend Direct3D 11 — sem instância (nunca
+/// construído), só o que `impl Backend for DirectX11` precisa pra existir.
+pub(crate) enum DirectX11 {}
+
+fn device_context_raw(raw: &RawDevice) -> ID3D11DeviceContext {
+    raw.context.clone()
+}
+
+fn draw_raw(context: &Context, vertex_count: u32, first_vertex: u32) {
+    unsafe {
+        context.raw.Draw(vertex_count, first_vertex);
+    }
+}
+
+fn draw_instanced_raw(
+    context: &Context,
+    vertex_count: u32,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
+) {
+    unsafe {
+        context
+            .raw
+            .DrawInstanced(vertex_count, instance_count, first_vertex, first_instance);
+    }
+}
+
+fn draw_indexed_raw(context: &Context, index_count: u32, first_index: u32, base_vertex: i32) {
+    unsafe {
+        context.raw.DrawIndexed(index_count, first_index, base_vertex);
+    }
+}
+
+fn draw_indexed_instanced_raw(
+    context: &Context,
+    index_count: u32,
+    instance_count: u32,
+    first_index: u32,
+    base_vertex: i32,
+    first_instance: u32,
+) {
+    unsafe {
+        context.raw.DrawIndexedInstanced(
+            index_count,
+            instance_count,
+            first_index,
+            base_vertex,
+            first_instance,
+        );
+    }
+}
+
+fn draw_indirect_raw(context: &Context, args_buffer: &Buffer, args_offset: u64) {
+    unsafe {
+        context
+            .raw
+            .DrawInstancedIndirect(&args_buffer.raw, args_offset as u32);
+    }
+}
+
+fn draw_indexed_indirect_raw(context: &Context, args_buffer: &Buffer, args_offset: u64) {
+    unsafe {
+        context
+            .raw
+            .DrawIndexedInstancedIndirect(&args_buffer.raw, args_offset as u32);
+    }
+}
+
+fn set_render_target_raw(context: &Context, view: &RenderTargetView) {
+    unsafe {
+        context
+            .raw
+            .OMSetRenderTargets(Some(&[Some(view.raw.clone())]), None);
+    }
+}
+
+fn set_render_target_with_depth_raw(
+    context: &Context,
+    view: &RenderTargetView,
+    depth: &DepthStencilView,
+) {
+    unsafe {
+        context
+            .raw
+            .OMSetRenderTargets(Some(&[Some(view.raw.clone())]), Some(&depth.raw));
+    }
+}
+
+fn set_render_targets_raw(context: &Context, views: &[&RenderTargetView]) {
+    unsafe {
+        let raw_views: Vec<Option<ID3D11RenderTargetView>> =
+            views.iter().map(|view| Some(view.raw.clone())).collect();
+        context.raw.OMSetRenderTargets(Some(&raw_views), None);
+    }
+}
+
+fn set_render_targets_with_depth_raw(
+    context: &Context,
+    views: &[&RenderTargetView],
+    depth: &DepthStencilView,
+) {
+    unsafe {
+        let raw_views: Vec<Option<ID3D11RenderTargetView>> =
+            views.iter().map(|view| Some(view.raw.clone())).collect();
+        context
+            .raw
+            .OMSetRenderTargets(Some(&raw_views), Some(&depth.raw));
+    }
+}
+
+fn clear_render_target_raw(context: &Context, view: &RenderTargetView, color: [f32; 4]) {
+    unsafe {
+        context.raw.ClearRenderTargetView(&view.raw, &color);
+    }
+}
+
+fn clear_depth_raw(context: &Context, view: &DepthStencilView, depth: f32) {
+    unsafe {
+        context.raw.ClearDepthStencilView(
+            &view.raw,
+            windows::Win32::Graphics::Direct3D11::D3D11_CLEAR_DEPTH.0 as u32,
+            depth,
+            0,
+        );
+    }
+}
+
+fn flush_raw(context: &Context) {
+    unsafe {
+        context.raw.Flush();
+    }
+}
+
+fn set_viewport_raw(context: &Context, viewport: Viewport) {
+    use windows::Win32::Graphics::Direct3D11::D3D11_VIEWPORT;
+    unsafe {
+        context.raw.RSSetViewports(Some(&[D3D11_VIEWPORT {
+            TopLeftX: viewport.x,
+            TopLeftY: viewport.y,
+            Width: viewport.width,
+            Height: viewport.height,
+            MinDepth: viewport.min_depth,
+            MaxDepth: viewport.max_depth,
+        }]));
+    }
+}
+
+fn topology_to_d3d(
+    topology: crate::input::PrimitiveTopology,
+) -> windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY {
+    use windows::Win32::Graphics::Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    match topology {
+        crate::input::PrimitiveTopology::TriangleList => D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+    }
+}
+
+fn set_pipeline_raw(context: &Context, pipeline: &GraphicsPipeline) {
+    unsafe {
+        context.raw.RSSetState(&pipeline.rasterizer_state);
+        context.raw.OMSetBlendState(
+            &pipeline.blend_state,
+            Some(&[1.0, 1.0, 1.0, 1.0]),
+            0xffffffff,
+        );
+        context
+            .raw
+            .OMSetDepthStencilState(&pipeline.depth_stencil_state, pipeline.stencil_reference);
+        context.raw.IASetInputLayout(&pipeline.input_layout);
+        context.raw.VSSetShader(&pipeline.vertex_shader, None);
+        context.raw.PSSetShader(&pipeline.pixel_shader, None);
+        context
+            .raw
+            .IASetPrimitiveTopology(topology_to_d3d(pipeline.primitive_topology));
+    }
+}
+
+fn set_vertex_buffer_raw(context: &Context, slot: u32, buffer: &Buffer, stride: u32) {
+    unsafe {
+        context.raw.IASetVertexBuffers(
+            slot,
+            1,
+            Some(&Some(buffer.raw.clone())),
+            Some(&stride),
+            Some(&0),
+        );
+    }
+}
+
+fn set_index_buffer_raw(context: &Context, buffer: &Buffer, format: IndexFormat) {
+    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R32_UINT};
+    let dxgi_format = match format {
+        IndexFormat::Uint16 => DXGI_FORMAT_R16_UINT,
+        IndexFormat::Uint32 => DXGI_FORMAT_R32_UINT,
+    };
+    unsafe {
+        context.raw.IASetIndexBuffer(&buffer.raw, dxgi_format, 0);
+    }
+}
+
+fn set_constant_buffer_raw(context: &Context, slot: u32, buffer: &Buffer) {
+    unsafe {
+        let slice = Some(&[Some(buffer.raw.clone())][..]);
+        context.raw.VSSetConstantBuffers(slot, slice);
+        context.raw.PSSetConstantBuffers(slot, slice);
+    }
+}
+
+fn set_shader_resource_raw(context: &Context, slot: u32, view: &ShaderResourceView) {
+    unsafe {
+        context
+            .raw
+            .PSSetShaderResources(slot, Some(&[Some(view.raw.clone())]));
+    }
+}
+
+fn set_sampler_raw(context: &Context, slot: u32, sampler: &Sampler) {
+    unsafe {
+        context
+            .raw
+            .PSSetSamplers(slot, Some(&[Some(sampler.raw.clone())]));
+    }
+}
+
+fn set_blend_state_raw(context: &Context, state: &BlendState) {
+    unsafe {
+        context
+            .raw
+            .OMSetBlendState(&state.raw, Some(&[1.0, 1.0, 1.0, 1.0]), 0xffffffff);
+    }
+}
+
+fn set_depth_stencil_state_raw(context: &Context, state: &DepthStencilState) {
+    unsafe {
+        context.raw.OMSetDepthStencilState(&state.raw, 0);
+    }
+}
+
+fn update_buffer_raw(context: &Context, buffer: &Buffer, data: &[u8]) {
+    unsafe {
+        context
+            .raw
+            .UpdateSubresource(&buffer.raw, 0, None, data.as_ptr() as *const _, 0, 0);
+    }
+}
+
+fn set_compute_pipeline_raw(context: &Context, pipeline: &ComputePipeline) {
+    unsafe {
+        context.raw.CSSetShader(&pipeline.compute_shader, None);
+    }
+}
+
+fn set_compute_constant_buffer_raw(context: &Context, slot: u32, buffer: &Buffer) {
+    unsafe {
+        context
+            .raw
+            .CSSetConstantBuffers(slot, Some(&[Some(buffer.raw.clone())]));
+    }
+}
+
+fn set_unordered_access_view_raw(context: &Context, slot: u32, view: &UnorderedAccessView) {
+    unsafe {
+        context
+            .raw
+            .CSSetUnorderedAccessViews(slot, 1, Some(&Some(view.raw.clone())), None);
+    }
+}
+
+fn dispatch_raw(context: &Context, x: u32, y: u32, z: u32) {
+    unsafe {
+        context.raw.Dispatch(x, y, z);
+    }
+}
+
+fn dispatch_indirect_raw(context: &Context, args_buffer: &Buffer, args_offset: u64) {
+    unsafe {
+        context
+            .raw
+            .DispatchIndirect(&args_buffer.raw, args_offset as u32);
+    }
+}
+
+fn copy_buffer_raw(context: &Context, src: &Buffer, dst: &Buffer) {
+    unsafe {
+        context.raw.CopyResource(&dst.raw, &src.raw);
+    }
+}
+
+fn copy_texture_raw(
+    context: &Context,
+    src: &crate::texture::Texture2D,
+    dst: &crate::texture::Texture2D,
+) {
+    unsafe {
+        context.raw.CopyResource(&dst.raw, &src.raw);
+    }
+}
+
+fn generate_mips_raw(context: &Context, view: &ShaderResourceView) {
+    unsafe {
+        context.raw.GenerateMips(&view.raw);
+    }
+}
+
+fn begin_query_raw(context: &Context, query: &Query) {
+    unsafe {
+        context.raw.Begin(&query.raw);
+    }
+}
+
+fn end_query_raw(context: &Context, query: &Query) {
+    unsafe {
+        context.raw.End(&query.raw);
+    }
+}
+
+impl crate::backend::Backend for DirectX11 {
+    type RawDevice = RawDevice;
+    type RawContext = ID3D11DeviceContext;
+    type RawCommandBuffer = ID3D11CommandList;
+    type RawBuffer = ID3D11Buffer;
+    type RawTexture2D = ID3D11Texture2D;
+    type RawRenderTargetView = ID3D11RenderTargetView;
+    type RawShaderResourceView = ID3D11ShaderResourceView;
+    type RawDepthStencilView = ID3D11DepthStencilView;
+    type RawUnorderedAccessView = windows::Win32::Graphics::Direct3D11::ID3D11UnorderedAccessView;
+    type RawSampler = ID3D11SamplerState;
+    type RawInputLayout = ID3D11InputLayout;
+    type RawVertexShader = ID3D11VertexShader;
+    type RawPixelShader = ID3D11PixelShader;
+    type RawComputeShader = windows::Win32::Graphics::Direct3D11::ID3D11ComputeShader;
+    type RawRasterizerState = ID3D11RasterizerState;
+    type RawBlendState = windows::Win32::Graphics::Direct3D11::ID3D11BlendState;
+    type RawDepthStencilState = ID3D11DepthStencilState;
+    type RawQuery = ID3D11Query;
+    type RawSurface = windows::Win32::Foundation::HWND;
+    type RawSwapchain = RawSwapchain;
+
+    fn enumerate_adapters() -> Result<Vec<AdapterInfo>, GraphicsError> {
+        enumerate_adapters()
+    }
+    fn create_default_device(
+        desc: &DeviceDescriptor,
+    ) -> Result<(Self::RawDevice, bool), GraphicsError> {
+        create_default_device(desc)
+    }
+    fn device_properties(raw: &Self::RawDevice) -> (DeviceCapabilities, DeviceLimits, LimitsSource) {
+        device_properties(raw)
+    }
+    fn adapter_info_for_device(raw: &Self::RawDevice) -> Result<AdapterInfo, GraphicsError> {
+        adapter_info_for_device(raw)
+    }
+    fn is_device_lost(raw: &Self::RawDevice) -> bool {
+        is_device_lost(raw)
+    }
+    fn query_format_features(
+        device: &Device,
+        format: crate::format::Format,
+    ) -> Result<FormatFeatures, GraphicsError> {
+        query_format_features(device, format)
+    }
+    fn device_context(raw: &Self::RawDevice) -> Self::RawContext {
+        device_context_raw(raw)
+    }
+
+    fn create_buffer(
+        device: &Device,
+        desc: &crate::buffer::BufferDescriptor,
+        mip_data: Option<&[u8]>,
+    ) -> Result<Buffer, GraphicsError> {
+        create_buffer(device, desc, mip_data)
+    }
+    fn create_unordered_access_view(
+        device: &Device,
+        buffer: &Buffer,
+    ) -> Result<UnorderedAccessView, GraphicsError> {
+        create_unordered_access_view(device, buffer)
+    }
+    fn map_write_discard<'a>(
+        context: &'a Context,
+        buffer: &'a Buffer,
+    ) -> Result<crate::memory::MappedBuffer<'a>, GraphicsError> {
+        map_write_discard(context, buffer)
+    }
+    fn map_read<'a>(
+        context: &'a Context,
+        buffer: &'a Buffer,
+    ) -> Result<crate::memory::ReadMappedBuffer<'a>, GraphicsError> {
+        map_read(context, buffer)
+    }
+    fn unmap_buffer(context: &Context, buffer: &Buffer) {
+        unmap_buffer(context, buffer)
+    }
+
+    fn create_texture_2d(
+        device: &Device,
+        desc: &TextureDescriptor,
+        mip_data: &[&[u8]],
+    ) -> Result<crate::texture::Texture2D, GraphicsError> {
+        create_texture_2d(device, desc, mip_data)
+    }
+    fn create_render_target_texture(
+        device: &Device,
+        desc: &TextureDescriptor,
+    ) -> Result<(crate::texture::Texture2D, RenderTargetView), GraphicsError> {
+        create_render_target_texture(device, desc)
+    }
+    fn create_shader_resource_view(
+        device: &Device,
+        texture: &crate::texture::Texture2D,
+    ) -> Result<ShaderResourceView, GraphicsError> {
+        create_shader_resource_view(device, texture)
+    }
+    fn create_depth_stencil_view(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: crate::format::Format,
+    ) -> Result<DepthStencilView, GraphicsError> {
+        create_depth_stencil_view(device, width, height, format)
+    }
+    fn generate_mips(context: &Context, view: &ShaderResourceView) {
+        generate_mips_raw(context, view)
+    }
+    fn capture_texture(
+        device: &Device,
+        texture: &crate::texture::Texture2D,
+    ) -> Result<(u32, u32, crate::format::Format, Vec<u8>), GraphicsError> {
+        capture_texture(device, texture)
+    }
+
+    fn compile_hlsl(
+        source: &str,
+        entry_point: &str,
+        target: &str,
+    ) -> Result<Vec<u8>, GraphicsError> {
+        compile_hlsl(source, entry_point, target)
+    }
+    fn create_vertex_shader(device: &Device, bytecode: &[u8]) -> Result<VertexShader, GraphicsError> {
+        create_vertex_shader(device, bytecode)
+    }
+    fn create_pixel_shader(device: &Device, bytecode: &[u8]) -> Result<PixelShader, GraphicsError> {
+        create_pixel_shader(device, bytecode)
+    }
+    fn create_compute_shader(
+        device: &Device,
+        bytecode: &[u8],
+    ) -> Result<ComputeShader, GraphicsError> {
+        create_compute_shader(device, bytecode)
+    }
+    fn create_input_layout(
+        device: &Device,
+        attributes: &[crate::input::VertexAttribute],
+        vertex_shader: &VertexShader,
+    ) -> Result<crate::input::InputLayout, GraphicsError> {
+        create_input_layout(device, attributes, vertex_shader)
+    }
+
+    fn create_rasterizer_state(
+        device: &Device,
+        desc: &RasterizerStateDescriptor,
+    ) -> Result<RasterizerState, GraphicsError> {
+        create_rasterizer_state(device, desc)
+    }
+    fn create_blend_state(
+        device: &Device,
+        desc: &BlendStateDescriptor,
+    ) -> Result<BlendState, GraphicsError> {
+        create_blend_state(device, desc)
+    }
+    fn create_depth_stencil_state(
+        device: &Device,
+        desc: &DepthStencilStateDescriptor,
+    ) -> Result<DepthStencilState, GraphicsError> {
+        create_depth_stencil_state(device, desc)
+    }
+
+    fn set_render_target(context: &Context, view: &RenderTargetView) {
+        set_render_target_raw(context, view)
+    }
+    fn set_render_target_with_depth(
+        context: &Context,
+        view: &RenderTargetView,
+        depth: &DepthStencilView,
+    ) {
+        set_render_target_with_depth_raw(context, view, depth)
+    }
+    fn set_render_targets(context: &Context, views: &[&RenderTargetView]) {
+        set_render_targets_raw(context, views)
+    }
+    fn set_render_targets_with_depth(
+        context: &Context,
+        views: &[&RenderTargetView],
+        depth: &DepthStencilView,
+    ) {
+        set_render_targets_with_depth_raw(context, views, depth)
+    }
+    fn clear_render_target(context: &Context, view: &RenderTargetView, color: [f32; 4]) {
+        clear_render_target_raw(context, view, color)
+    }
+    fn clear_depth(context: &Context, view: &DepthStencilView, depth: f32) {
+        clear_depth_raw(context, view, depth)
+    }
+    fn flush(context: &Context) {
+        flush_raw(context)
+    }
+    fn set_viewport(context: &Context, viewport: Viewport) {
+        set_viewport_raw(context, viewport)
+    }
+    fn set_pipeline(context: &Context, pipeline: &GraphicsPipeline) {
+        set_pipeline_raw(context, pipeline)
+    }
+    fn set_vertex_buffer(context: &Context, slot: u32, buffer: &Buffer, stride: u32) {
+        set_vertex_buffer_raw(context, slot, buffer, stride)
+    }
+    fn set_index_buffer(context: &Context, buffer: &Buffer, format: IndexFormat) {
+        set_index_buffer_raw(context, buffer, format)
+    }
+    fn set_constant_buffer(context: &Context, slot: u32, buffer: &Buffer) {
+        set_constant_buffer_raw(context, slot, buffer)
+    }
+    fn set_shader_resource(context: &Context, slot: u32, view: &ShaderResourceView) {
+        set_shader_resource_raw(context, slot, view)
+    }
+    fn set_sampler(context: &Context, slot: u32, sampler: &Sampler) {
+        set_sampler_raw(context, slot, sampler)
+    }
+    fn set_blend_state(context: &Context, state: &BlendState) {
+        set_blend_state_raw(context, state)
+    }
+    fn set_depth_stencil_state(context: &Context, state: &DepthStencilState) {
+        set_depth_stencil_state_raw(context, state)
+    }
+    fn update_buffer(context: &Context, buffer: &Buffer, data: &[u8]) {
+        update_buffer_raw(context, buffer, data)
+    }
+    fn draw(context: &Context, vertex_count: u32, first_vertex: u32) {
+        draw_raw(context, vertex_count, first_vertex)
+    }
+    fn draw_instanced(
+        context: &Context,
+        vertex_count: u32,
+        instance_count: u32,
+        first_vertex: u32,
+        first_instance: u32,
+    ) {
+        draw_instanced_raw(context, vertex_count, instance_count, first_vertex, first_instance)
+    }
+    fn draw_indexed(context: &Context, index_count: u32, first_index: u32, base_vertex: i32) {
+        draw_indexed_raw(context, index_count, first_index, base_vertex)
+    }
+    fn draw_indexed_instanced(
+        context: &Context,
+        index_count: u32,
+        instance_count: u32,
+        first_index: u32,
+        base_vertex: i32,
+        first_instance: u32,
+    ) {
+        draw_indexed_instanced_raw(
+            context,
+            index_count,
+            instance_count,
+            first_index,
+            base_vertex,
+            first_instance,
+        )
+    }
+    fn draw_indirect(context: &Context, args_buffer: &Buffer, args_offset: u64) {
+        draw_indirect_raw(context, args_buffer, args_offset)
+    }
+    fn draw_indexed_indirect(context: &Context, args_buffer: &Buffer, args_offset: u64) {
+        draw_indexed_indirect_raw(context, args_buffer, args_offset)
+    }
+
+    fn set_compute_pipeline(context: &Context, pipeline: &ComputePipeline) {
+        set_compute_pipeline_raw(context, pipeline)
+    }
+    fn set_compute_constant_buffer(context: &Context, slot: u32, buffer: &Buffer) {
+        set_compute_constant_buffer_raw(context, slot, buffer)
+    }
+    fn set_unordered_access_view(context: &Context, slot: u32, view: &UnorderedAccessView) {
+        set_unordered_access_view_raw(context, slot, view)
+    }
+    fn dispatch(context: &Context, x: u32, y: u32, z: u32) {
+        dispatch_raw(context, x, y, z)
+    }
+    fn dispatch_indirect(context: &Context, args_buffer: &Buffer, args_offset: u64) {
+        dispatch_indirect_raw(context, args_buffer, args_offset)
+    }
+
+    fn copy_buffer(context: &Context, src: &Buffer, dst: &Buffer) {
+        copy_buffer_raw(context, src, dst)
+    }
+    fn copy_texture(
+        context: &Context,
+        src: &crate::texture::Texture2D,
+        dst: &crate::texture::Texture2D,
+    ) {
+        copy_texture_raw(context, src, dst)
+    }
+
+    fn create_command_encoder(device: &Device) -> Result<CommandEncoder, GraphicsError> {
+        create_command_encoder(device)
+    }
+    fn finish_command_list(context: &Context) -> Result<CommandBuffer, GraphicsError> {
+        finish_command_list(context)
+    }
+    fn execute_command_list(context: &Context, buffer: &CommandBuffer) {
+        execute_command_list(context, buffer)
+    }
+    fn wait_idle(context: &Context) -> Result<(), GraphicsError> {
+        wait_idle(context)
+    }
+
+    fn create_query(device: &Device, kind: QueryType) -> Result<Query, GraphicsError> {
+        create_query(device, kind)
+    }
+    fn begin_query(context: &Context, query: &Query) {
+        begin_query_raw(context, query)
+    }
+    fn end_query(context: &Context, query: &Query) {
+        end_query_raw(context, query)
+    }
+    fn is_query_ready(context: &Context, query: &Query) -> bool {
+        is_query_ready(context, query)
+    }
+    fn get_occlusion_result(context: &Context, query: &Query) -> Option<u64> {
+        get_occlusion_result(context, query)
+    }
+
+    fn push_debug_group(context: &Context, label: &str) {
+        push_debug_group(context, label)
+    }
+    fn pop_debug_group(context: &Context) {
+        pop_debug_group(context)
+    }
+    fn insert_debug_marker(context: &Context, label: &str) {
+        insert_debug_marker(context, label)
+    }
+    fn set_buffer_label(buffer: &Buffer, label: &str) {
+        set_resource_label(&buffer.raw, label)
+    }
+    fn set_texture_label(texture: &crate::texture::Texture2D, label: &str) {
+        set_resource_label(&texture.raw, label)
+    }
+
+    fn create_sampler(device: &Device, desc: &SamplerDescriptor) -> Result<Sampler, GraphicsError> {
+        create_sampler(device, desc)
+    }
+
+    fn surface_from_handle(
+        handle: raw_window_handle::RawWindowHandle,
+    ) -> Result<Surface, GraphicsError> {
+        surface_from_handle(handle)
+    }
+    fn create_swapchain(
+        device: &Device,
+        surface: &Surface,
+        desc: &SwapchainDescriptor,
+    ) -> Result<Self::RawSwapchain, GraphicsError> {
+        create_swapchain(device, surface, desc)
+    }
+    fn resize_swapchain(
+        raw: &mut Self::RawSwapchain,
+        width: u32,
+        height: u32,
+    ) -> Result<(), GraphicsError> {
+        resize_swapchain(raw, width, height)
+    }
+    fn create_swapchain_render_target_view(
+        device: &Device,
+        raw: &Self::RawSwapchain,
+        size: crate::surface::Extent2D,
+        format: crate::format::Format,
+    ) -> Result<RenderTargetView, GraphicsError> {
+        create_swapchain_render_target_view(device, raw, size, format)
+    }
+    fn capture_swapchain_frame(
+        device: &Device,
+        raw: &Self::RawSwapchain,
+    ) -> Result<(u32, u32, crate::format::Format, Vec<u8>), GraphicsError> {
+        capture_swapchain_frame(device, raw)
+    }
+    fn present(
+        raw: &Self::RawSwapchain,
+        present_mode: crate::surface::PresentMode,
+    ) -> Result<PresentResult, GraphicsError> {
+        present(raw, present_mode)
+    }
+}
