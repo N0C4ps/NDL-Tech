@@ -22,7 +22,7 @@ use ndl_render::buffer::{BufferDescriptor, BufferUsage};
 use ndl_render::core::{Device, DeviceDescriptor};
 use ndl_render::depth_stencil::DepthStencilStateDescriptor;
 use ndl_render::format::Format;
-use ndl_render::input::{IndexFormat, PrimitiveTopology, VertexAttribute};
+use ndl_render::input::{IndexFormat, PrimitiveTopology, VertexAttribute, VertexStepMode};
 use ndl_render::pipeline::{GraphicsPipelineDescriptor, GraphicsPipelineStateDescriptor};
 use ndl_render::raster::Viewport;
 use ndl_render::shader::compile_hlsl;
@@ -150,12 +150,16 @@ fn depth_test_and_blend_with_indexed_draws() {
             semantic_index: 0,
             format: Format::Rgb32Float,
             offset: 0,
+            input_slot: 0,
+            step_mode: VertexStepMode::Vertex,
         },
         VertexAttribute {
             semantic: "COLOR",
             semantic_index: 0,
             format: Format::Rgba32Float,
             offset: 12,
+            input_slot: 0,
+            step_mode: VertexStepMode::Vertex,
         },
     ];
     let input_layout = device

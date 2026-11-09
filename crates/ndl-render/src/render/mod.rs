@@ -10,9 +10,12 @@
 //!
 //! Esta primeira versão suporta um attachment de cor e, opcionalmente, um
 //! attachment de depth. As operações de carga são `Load` e `Clear`. Stores
-//! sempre preservam o conteúdo; múltiplos attachments, scissor, bind groups,
-//! draws indiretos e operações `DontCare`/`Discard` ainda não fazem parte da
-//! API.
+//! sempre preservam o conteúdo; [`RenderPass::draw_instanced`],
+//! [`RenderPass::draw_indexed_instanced`], [`RenderPass::draw_indirect`] e
+//! [`RenderPass::draw_indexed_indirect`] já são reais (ver
+//! [`crate::context::Context`] para o que cada um exige). Múltiplos
+//! attachments, scissor, bind groups e operações `DontCare`/`Discard`
+//! ainda não fazem parte da API.
 
 use std::ops::Range;
 
@@ -255,6 +258,58 @@ impl RenderPass<'_> {
                 .draw_indexed(count, indices.start, base_vertex)?;
         }
         Ok(())
+    }
+
+    /// Desenha `instance_count` instâncias do intervalo de vértices
+    /// `[vertices.start, vertices.end)`, com `SV_InstanceID` começando em
+    /// `first_instance` — ver [`crate::context::Context::draw_instanced`].
+    pub fn draw_instanced(
+        &mut self,
+        vertices: Range<u32>,
+        instance_count: u32,
+        first_instance: u32,
+    ) -> Result<(), GraphicsError> {
+        let count = checked_range_count("vertices", &vertices)?;
+        self.context
+            .draw_instanced(count, instance_count, vertices.start, first_instance)
+    }
+
+    /// Desenha `instance_count` instâncias de índices do intervalo
+    /// `[indices.start, indices.end)`, somando `base_vertex` a cada índice
+    /// e com `SV_InstanceID` começando em `first_instance` — ver
+    /// [`crate::context::Context::draw_indexed_instanced`].
+    pub fn draw_indexed_instanced(
+        &mut self,
+        indices: Range<u32>,
+        base_vertex: i32,
+        instance_count: u32,
+        first_instance: u32,
+    ) -> Result<(), GraphicsError> {
+        let count = checked_range_count("indices", &indices)?;
+        self.context.draw_indexed_instanced(
+            count,
+            instance_count,
+            indices.start,
+            base_vertex,
+            first_instance,
+        )
+    }
+
+    /// Desenha lendo os argumentos de `args_buffer` a partir de
+    /// `args_offset` — ver [`crate::context::Context::draw_indirect`].
+    pub fn draw_indirect(&mut self, args_buffer: &Buffer, args_offset: u64) -> Result<(), GraphicsError> {
+        self.context.draw_indirect(args_buffer, args_offset)
+    }
+
+    /// Desenha com índices lendo os argumentos de `args_buffer` a partir
+    /// de `args_offset` — ver
+    /// [`crate::context::Context::draw_indexed_indirect`].
+    pub fn draw_indexed_indirect(
+        &mut self,
+        args_buffer: &Buffer,
+        args_offset: u64,
+    ) -> Result<(), GraphicsError> {
+        self.context.draw_indexed_indirect(args_buffer, args_offset)
     }
 
     /// Fecha o escopo lógico do pass. O backend mantém o estado atual

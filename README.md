@@ -54,6 +54,16 @@ cópias, queries, sincronização e debug. Isso descreve o subconjunto já
 implementado, não uma API completa: cada módulo documenta seus recursos
 disponíveis e pendências, e partes como múltiplos backends, MRT, shaders
 geometry/hull/domain e operações de inspeção continuam reservadas.
+
+Desenho instanciado (`Context::draw_instanced`/`draw_indexed_instanced`,
+com atributos de vertex buffer por instância via
+`VertexAttribute::step_mode`) e desenho/dispatch indireto
+(`Context::draw_indirect`/`draw_indexed_indirect`/`dispatch_indirect`, lendo
+os argumentos de um `Buffer` com `BufferUsage::Indirect` em vez de recebê-los
+da CPU a cada chamada) já são reais — a base para desenhar muitos objetos
+parecidos numa única chamada e para GPU-driven rendering. Por ora um buffer
+indirect só é escrito pela CPU; gravá-lo via UAV num compute shader continua
+reservado.
 Pipelines podem declarar formatos esperados de cor e depth; o `RenderPass`
 confere esses formatos e dimensões antes de emitir draws. O estado fixo atual
 inclui rasterização, blend (incluindo alpha separado e máscara de canais) e

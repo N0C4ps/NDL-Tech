@@ -3,14 +3,20 @@
 //! ## Estado atual
 //!
 //! [`Buffer`] já é real, com uso genérico (vertex/index/constant/
-//! structured) marcado por [`BufferUsage`]. `BufferUsage::Storage` é um
-//! structured buffer com leitura/escrita por compute shader (UAV) — ver
-//! [`crate::compute`]. `RawBuffer`, `IndirectBuffer` e `StagingBuffer`
-//! continuam reservados.
+//! structured/indirect) marcado por [`BufferUsage`]. `BufferUsage::Storage`
+//! é um structured buffer com leitura/escrita por compute shader (UAV) —
+//! ver [`crate::compute`]. `BufferUsage::Indirect` guarda os argumentos de
+//! um `draw`/`dispatch` indireto (ver [`DrawIndirectArgs`],
+//! [`DrawIndexedIndirectArgs`] e [`crate::compute::DispatchIndirectArgs`]) —
+//! hoje só escrito pela CPU (via `create_buffer_with_data` ou, se
+//! `dynamic`, [`crate::context::Context::map_write_discard`]); um buffer
+//! indirect gravável por compute shader (UAV) continua reservado. `RawBuffer`
+//! continua reservado.
 //!
-//! Operações de atualização (`write_buffer`, `map_buffer`, ...) também
-//! continuam reservadas: por ora um buffer é escrito uma vez, na criação,
-//! via [`crate::core::Device::create_buffer_with_data`].
+//! Operações de atualização (`write_buffer`, `map_buffer`, ...) para
+//! buffers não-dynamic também continuam reservadas: por ora um buffer
+//! imutável é escrito uma vez, na criação, via
+//! [`crate::core::Device::create_buffer_with_data`].
 
 use crate::core::{Device, GraphicsError};
 use crate::view::UnorderedAccessView;
@@ -30,6 +36,12 @@ pub enum BufferUsage {
     /// [`crate::context::Context::copy_buffer`] +
     /// [`crate::context::Context::map_read`].
     Staging,
+    /// Buffer de argumentos para `draw`/`dispatch` indireto — guarda os
+    /// bytes lidos pela GPU ao emitir [`crate::context::Context::draw_indirect`],
+    /// [`crate::context::Context::draw_indexed_indirect`] ou
+    /// [`crate::context::Context::dispatch_indirect`], no lugar de contagens
+    /// fixas passadas pela CPU a cada chamada.
+    Indirect,
 }
 
 /// Configuração usada para criar um [`Buffer`].
@@ -213,5 +225,72 @@ fn validate_descriptor(desc: &BufferDescriptor, max_size: u64) -> Result<(), Gra
             reason: "storage buffers não podem usar mapeamento dynamic neste backend".into(),
         });
     }
+    if desc.usage == BufferUsage::Indirect && desc.size % 4 != 0 {
+        return Err(GraphicsError::InvalidArgument {
+            name: "BufferDescriptor::size",
+            reason: "indirect buffers precisam ter tamanho múltiplo de 4 bytes".into(),
+        });
+    }
     Ok(())
+}
+
+/// Argumentos de um [`crate::context::Context::draw_indirect`] — mesmo
+/// layout binário do `D3D11_DRAW_INSTANCED_INDIRECT_ARGS`. Escreva
+/// [`DrawIndirectArgs::to_bytes`] num [`Buffer`] com `BufferUsage::Indirect`
+/// (ex: via [`crate::context::Context::map_write_discard`]) no offset
+/// passado a `draw_indirect`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct DrawIndirectArgs {
+    pub vertex_count: u32,
+    pub instance_count: u32,
+    pub first_vertex: u32,
+    pub first_instance: u32,
+}
+
+impl DrawIndirectArgs {
+    /// Tamanho em bytes de um `DrawIndirectArgs` no buffer indirect.
+    pub const SIZE: u64 = 16;
+
+    /// Serializa os argumentos na ordem/largura exata que o D3D11 espera
+    /// encontrar no buffer indirect (little-endian, 4 `u32` sequenciais).
+    pub fn to_bytes(&self) -> [u8; Self::SIZE as usize] {
+        let mut out = [0u8; Self::SIZE as usize];
+        out[0..4].copy_from_slice(&self.vertex_count.to_le_bytes());
+        out[4..8].copy_from_slice(&self.instance_count.to_le_bytes());
+        out[8..12].copy_from_slice(&self.first_vertex.to_le_bytes());
+        out[12..16].copy_from_slice(&self.first_instance.to_le_bytes());
+        out
+    }
+}
+
+/// Argumentos de um [`crate::context::Context::draw_indexed_indirect`] —
+/// mesmo layout binário do `D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS`.
+/// Ver [`DrawIndirectArgs`] para como escrevê-los num buffer indirect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct DrawIndexedIndirectArgs {
+    pub index_count: u32,
+    pub instance_count: u32,
+    pub first_index: u32,
+    pub base_vertex: i32,
+    pub first_instance: u32,
+}
+
+impl DrawIndexedIndirectArgs {
+    /// Tamanho em bytes de um `DrawIndexedIndirectArgs` no buffer indirect.
+    pub const SIZE: u64 = 20;
+
+    /// Serializa os argumentos na ordem/largura exata que o D3D11 espera
+    /// encontrar no buffer indirect (little-endian, 5 campos de 4 bytes
+    /// sequenciais).
+    pub fn to_bytes(&self) -> [u8; Self::SIZE as usize] {
+        let mut out = [0u8; Self::SIZE as usize];
+        out[0..4].copy_from_slice(&self.index_count.to_le_bytes());
+        out[4..8].copy_from_slice(&self.instance_count.to_le_bytes());
+        out[8..12].copy_from_slice(&self.first_index.to_le_bytes());
+        out[12..16].copy_from_slice(&self.base_vertex.to_le_bytes());
+        out[16..20].copy_from_slice(&self.first_instance.to_le_bytes());
+        out
+    }
 }

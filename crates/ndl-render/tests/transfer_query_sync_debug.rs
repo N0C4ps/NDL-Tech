@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use ndl_render::buffer::{BufferDescriptor, BufferUsage};
 use ndl_render::core::{Device, DeviceDescriptor};
 use ndl_render::format::Format;
-use ndl_render::input::{PrimitiveTopology, VertexAttribute};
+use ndl_render::input::{PrimitiveTopology, VertexAttribute, VertexStepMode};
 use ndl_render::pipeline::GraphicsPipelineDescriptor;
 use ndl_render::query::QueryType;
 use ndl_render::raster::Viewport;
@@ -137,12 +137,16 @@ fn transfer_query_sync_and_debug_markers() {
             semantic_index: 0,
             format: Format::Rg32Float,
             offset: 0,
+            input_slot: 0,
+            step_mode: VertexStepMode::Vertex,
         },
         VertexAttribute {
             semantic: "COLOR",
             semantic_index: 0,
             format: Format::Rgb32Float,
             offset: 8,
+            input_slot: 0,
+            step_mode: VertexStepMode::Vertex,
         },
     ];
     let input_layout = device

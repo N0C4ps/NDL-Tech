@@ -21,7 +21,7 @@ use ndl_math::{Mat4, Vec3};
 use ndl_render::buffer::{BufferDescriptor, BufferUsage};
 use ndl_render::core::{Device, DeviceDescriptor};
 use ndl_render::format::Format;
-use ndl_render::input::{PrimitiveTopology, VertexAttribute};
+use ndl_render::input::{PrimitiveTopology, VertexAttribute, VertexStepMode};
 use ndl_render::pipeline::GraphicsPipelineDescriptor;
 use ndl_render::raster::Viewport;
 use ndl_render::sampler::SamplerDescriptor;
@@ -188,12 +188,16 @@ fn draws_a_textured_pulsing_quad() {
             semantic_index: 0,
             format: Format::Rg32Float,
             offset: 0,
+            input_slot: 0,
+            step_mode: VertexStepMode::Vertex,
         },
         VertexAttribute {
             semantic: "TEXCOORD",
             semantic_index: 0,
             format: Format::Rg32Float,
             offset: 8,
+            input_slot: 0,
+            step_mode: VertexStepMode::Vertex,
         },
     ];
     let input_layout = device

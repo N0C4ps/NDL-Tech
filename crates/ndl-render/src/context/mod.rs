@@ -32,7 +32,13 @@
 //! | Inspecao | `get_pipeline_state`, `get_bound_resources`, `get_render_targets`, `get_viewports` |
 //!
 //! Já implementados: `set_blend_state` e `set_depth_stencil_state`, além dos
-//! binds básicos, viewport, clear e draw. Eles não fazem parte da lista de
+//! binds básicos, viewport, clear e draw. `draw_instanced` e
+//! `draw_indexed_instanced` desenham N instâncias numa única chamada (ver
+//! `VertexStepMode::Instance` em [`crate::input::VertexAttribute`]);
+//! `draw_indirect` e `draw_indexed_indirect` leem os argumentos de um
+//! [`crate::buffer::Buffer`] (`BufferUsage::Indirect`) em vez de recebê-los
+//! da CPU — útil para GPU-driven rendering, ainda que o buffer indirect só
+//! seja escrito pela CPU por enquanto. Nenhum deles faz parte da lista de
 //! pendências.
 
 use std::collections::HashMap;
@@ -370,6 +376,52 @@ impl Context {
         Ok(())
     }
 
+    /// Valida que `[first_index, first_index + index_count)` cabe no
+    /// index buffer vinculado atualmente — compartilhado por `draw_indexed`
+    /// e `draw_indexed_instanced`.
+    fn check_index_range(
+        &self,
+        index_count: u32,
+        first_index: u32,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let bound = self.bound_index_buffer.lock().map_err(|_| {
+            crate::core::GraphicsError::Backend("estado interno do contexto envenenado".into())
+        })?;
+        let (buffer_size, format) =
+            bound.ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                name: "draw_indexed",
+                reason: "nenhum index buffer foi vinculado".into(),
+            })?;
+        let element_size = match format {
+            crate::input::IndexFormat::Uint16 => 2u64,
+            crate::input::IndexFormat::Uint32 => 4u64,
+        };
+        let offset = (first_index as u64)
+            .checked_mul(element_size)
+            .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                name: "first_index",
+                reason: "overflow no cálculo do offset".into(),
+            })?;
+        let size = (index_count as u64)
+            .checked_mul(element_size)
+            .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                name: "index_count",
+                reason: "overflow no cálculo do tamanho".into(),
+            })?;
+        if offset
+            .checked_add(size)
+            .map_or(true, |end| end > buffer_size)
+        {
+            return Err(crate::core::GraphicsError::OutOfBounds {
+                resource: "index buffer",
+                offset,
+                size,
+                limit: buffer_size,
+            });
+        }
+        Ok(())
+    }
+
     /// Desenha `index_count` índices a partir de `first_index`, somando
     /// `base_vertex` a cada índice antes de buscar o vértice correspondente
     /// — usa o pipeline, os vertex buffers e o index buffer vinculados
@@ -381,43 +433,7 @@ impl Context {
         base_vertex: i32,
     ) -> Result<(), crate::core::GraphicsError> {
         let _guard = self.lock_context();
-        {
-            let bound = self.bound_index_buffer.lock().map_err(|_| {
-                crate::core::GraphicsError::Backend("estado interno do contexto envenenado".into())
-            })?;
-            let (buffer_size, format) =
-                bound.ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
-                    name: "draw_indexed",
-                    reason: "nenhum index buffer foi vinculado".into(),
-                })?;
-            let element_size = match format {
-                crate::input::IndexFormat::Uint16 => 2u64,
-                crate::input::IndexFormat::Uint32 => 4u64,
-            };
-            let offset = (first_index as u64)
-                .checked_mul(element_size)
-                .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
-                    name: "first_index",
-                    reason: "overflow no cálculo do offset".into(),
-                })?;
-            let size = (index_count as u64)
-                .checked_mul(element_size)
-                .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
-                    name: "index_count",
-                    reason: "overflow no cálculo do tamanho".into(),
-                })?;
-            if offset
-                .checked_add(size)
-                .map_or(true, |end| end > buffer_size)
-            {
-                return Err(crate::core::GraphicsError::OutOfBounds {
-                    resource: "index buffer",
-                    offset,
-                    size,
-                    limit: buffer_size,
-                });
-            }
-        }
+        self.check_index_range(index_count, first_index)?;
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw.DrawIndexed(index_count, first_index, base_vertex);
@@ -429,17 +445,97 @@ impl Context {
         Ok(())
     }
 
-    /// Desenha `vertex_count` vértices a partir de `first_vertex`, usando
-    /// o pipeline e os vertex buffers vinculados atualmente.
-    pub fn draw(
+    /// Desenha `instance_count` instâncias de `index_count` índices a
+    /// partir de `first_index`, somando `base_vertex` a cada índice —
+    /// como `draw_indexed`, mas repetindo o desenho `instance_count` vezes
+    /// sem reenviar geometria, variando apenas o `SV_InstanceID`
+    /// (começando em `first_instance`) visível ao vertex shader e os
+    /// atributos de vertex buffers com `VertexStepMode::Instance`. É o
+    /// jeito de desenhar muitos objetos parecidos (vegetação, partículas,
+    /// multidão) com uma única chamada em vez de um `draw_indexed` por
+    /// objeto.
+    pub fn draw_indexed_instanced(
+        &self,
+        index_count: u32,
+        instance_count: u32,
+        first_index: u32,
+        base_vertex: i32,
+        first_instance: u32,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if instance_count == 0 {
+            return Ok(());
+        }
+        self.check_index_range(index_count, first_index)?;
+        first_instance
+            .checked_add(instance_count)
+            .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                name: "draw_indexed_instanced instance range",
+                reason: "first_instance + instance_count excede u32::MAX".into(),
+            })?;
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.DrawIndexedInstanced(
+                index_count,
+                instance_count,
+                first_index,
+                base_vertex,
+                first_instance,
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (index_count, instance_count, first_index, base_vertex, first_instance);
+        }
+        Ok(())
+    }
+
+    /// Desenha via [`crate::buffer::Buffer`] com `BufferUsage::Indirect`,
+    /// lendo `index_count`/`instance_count`/`first_index`/`base_vertex`/
+    /// `first_instance` de `args_buffer` a partir de `args_offset` (mesmo
+    /// layout binário de [`crate::buffer::DrawIndexedIndirectArgs`]) —
+    /// equivalente a `draw_indexed_instanced`, mas os argumentos são lidos
+    /// pela própria GPU em vez de enviados pela CPU a cada chamada. Isso
+    /// permite que um compute shader (culling, LOD) decida quantas
+    /// instâncias desenhar sem a CPU precisar ler o resultado de volta
+    /// antes de desenhar.
+    ///
+    /// Hoje `args_buffer` só pode ser escrito pela CPU (buffer indirect
+    /// gravável por UAV continua reservado), mas isso já evita reemitir um
+    /// `draw_indexed_instanced` por lote quando a contagem é decidida fora
+    /// do laço de desenho principal.
+    pub fn draw_indexed_indirect(
+        &self,
+        args_buffer: &Buffer,
+        args_offset: u64,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        crate::compute::validate_indirect_args(
+            args_buffer,
+            args_offset,
+            crate::buffer::DrawIndexedIndirectArgs::SIZE,
+            "draw_indexed_indirect",
+        )?;
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw
+                .DrawIndexedInstancedIndirect(&args_buffer.raw, args_offset as u32);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (args_buffer, args_offset);
+        }
+        Ok(())
+    }
+
+    /// Valida que `[first_vertex, first_vertex + vertex_count)` cabe no
+    /// vertex buffer vinculado no slot 0 — compartilhado por `draw` e
+    /// `draw_instanced`.
+    fn check_vertex_range(
         &self,
         vertex_count: u32,
         first_vertex: u32,
     ) -> Result<(), crate::core::GraphicsError> {
-        let _guard = self.lock_context();
-        if vertex_count == 0 {
-            return Ok(());
-        }
         let end_vertex = first_vertex.checked_add(vertex_count).ok_or_else(|| {
             crate::core::GraphicsError::InvalidArgument {
                 name: "draw vertex range",
@@ -477,6 +573,21 @@ impl Context {
                 });
             }
         }
+        Ok(())
+    }
+
+    /// Desenha `vertex_count` vértices a partir de `first_vertex`, usando
+    /// o pipeline e os vertex buffers vinculados atualmente.
+    pub fn draw(
+        &self,
+        vertex_count: u32,
+        first_vertex: u32,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if vertex_count == 0 {
+            return Ok(());
+        }
+        self.check_vertex_range(vertex_count, first_vertex)?;
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw.Draw(vertex_count, first_vertex);
@@ -484,6 +595,75 @@ impl Context {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (vertex_count, first_vertex);
+        }
+        Ok(())
+    }
+
+    /// Desenha `instance_count` instâncias de `vertex_count` vértices a
+    /// partir de `first_vertex` — como `draw`, mas repetindo o desenho
+    /// `instance_count` vezes sem reenviar geometria, variando apenas o
+    /// `SV_InstanceID` (começando em `first_instance`) visível ao vertex
+    /// shader e os atributos de vertex buffers com
+    /// `VertexStepMode::Instance` (ver [`crate::input::VertexAttribute`]).
+    pub fn draw_instanced(
+        &self,
+        vertex_count: u32,
+        instance_count: u32,
+        first_vertex: u32,
+        first_instance: u32,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if vertex_count == 0 || instance_count == 0 {
+            return Ok(());
+        }
+        self.check_vertex_range(vertex_count, first_vertex)?;
+        first_instance
+            .checked_add(instance_count)
+            .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                name: "draw_instanced instance range",
+                reason: "first_instance + instance_count excede u32::MAX".into(),
+            })?;
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw
+                .DrawInstanced(vertex_count, instance_count, first_vertex, first_instance);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (vertex_count, instance_count, first_vertex, first_instance);
+        }
+        Ok(())
+    }
+
+    /// Desenha via [`crate::buffer::Buffer`] com `BufferUsage::Indirect`,
+    /// lendo `vertex_count`/`instance_count`/`first_vertex`/`first_instance`
+    /// de `args_buffer` a partir de `args_offset` (mesmo layout binário de
+    /// [`crate::buffer::DrawIndirectArgs`]) — equivalente a `draw_instanced`,
+    /// mas os argumentos são lidos pela própria GPU em vez de enviados pela
+    /// CPU a cada chamada.
+    ///
+    /// Hoje `args_buffer` só pode ser escrito pela CPU (buffer indirect
+    /// gravável por UAV continua reservado).
+    pub fn draw_indirect(
+        &self,
+        args_buffer: &Buffer,
+        args_offset: u64,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        crate::compute::validate_indirect_args(
+            args_buffer,
+            args_offset,
+            crate::buffer::DrawIndirectArgs::SIZE,
+            "draw_indirect",
+        )?;
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw
+                .DrawInstancedIndirect(&args_buffer.raw, args_offset as u32);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (args_buffer, args_offset);
         }
         Ok(())
     }

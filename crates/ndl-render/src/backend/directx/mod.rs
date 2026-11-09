@@ -25,7 +25,8 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_FEATURE_DATA_D3D11_OPTIONS, D3D11_FILTER_MIN_MAG_MIP_LINEAR,
     D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA,
     D3D11_MAP_WRITE_DISCARD, D3D11_MAPPED_SUBRESOURCE, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
-    D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, D3D11_SAMPLER_DESC, D3D11_SDK_VERSION,
+    D3D11_INPUT_PER_INSTANCE_DATA, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED,
+    D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS, D3D11_SAMPLER_DESC, D3D11_SDK_VERSION,
     D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_MIRROR,
     D3D11_TEXTURE_ADDRESS_WRAP, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_DYNAMIC,
     D3D11CreateDevice, ID3D11Buffer, ID3D11CommandList, ID3D11DepthStencilState,
@@ -381,6 +382,10 @@ fn bind_flag_for_usage(usage: crate::buffer::BufferUsage) -> D3D11_BIND_FLAG {
         Constant => D3D11_BIND_CONSTANT_BUFFER,
         Storage => D3D11_BIND_FLAG(D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_UNORDERED_ACCESS.0),
         Staging => D3D11_BIND_FLAG(0),
+        // Um buffer de argumentos indiretos não precisa de bind a nenhum
+        // estágio — D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS (abaixo) já é o
+        // que permite usá-lo em Draw*Indirect/DispatchIndirect.
+        Indirect => D3D11_BIND_FLAG(0),
     }
 }
 
@@ -421,6 +426,8 @@ pub(crate) fn create_buffer(
         },
         MiscFlags: if matches!(desc.usage, crate::buffer::BufferUsage::Storage) {
             D3D11_RESOURCE_MISC_BUFFER_STRUCTURED.0 as u32
+        } else if matches!(desc.usage, crate::buffer::BufferUsage::Indirect) {
+            D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS.0 as u32
         } else {
             0
         },
@@ -625,14 +632,22 @@ pub(crate) fn create_input_layout(
         .zip(&semantic_names)
         .map(|(attr, name)| {
             let format = attr.format.to_dxgi_format().unwrap_or(DXGI_FORMAT_UNKNOWN);
+            let is_instance = attr.step_mode == crate::input::VertexStepMode::Instance;
             D3D11_INPUT_ELEMENT_DESC {
                 SemanticName: PCSTR(name.as_ptr() as *const u8),
                 SemanticIndex: attr.semantic_index,
                 Format: format,
-                InputSlot: 0,
+                InputSlot: attr.input_slot,
                 AlignedByteOffset: attr.offset,
-                InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-                InstanceDataStepRate: 0,
+                InputSlotClass: if is_instance {
+                    D3D11_INPUT_PER_INSTANCE_DATA
+                } else {
+                    D3D11_INPUT_PER_VERTEX_DATA
+                },
+                // 1 elemento de instância por instância desenhada — o caso
+                // comum; uma taxa diferente (ex: 1 a cada N instâncias)
+                // continua reservada enquanto não houver um uso real para ela.
+                InstanceDataStepRate: if is_instance { 1 } else { 0 },
             }
         })
         .collect();

@@ -6,6 +6,7 @@
 #![cfg(target_os = "windows")]
 
 use ndl_render::buffer::{BufferDescriptor, BufferUsage};
+use ndl_render::compute::DispatchIndirectArgs;
 use ndl_render::core::{Device, DeviceDescriptor};
 use ndl_render::pipeline::ComputePipelineDescriptor;
 use ndl_render::shader::compile_hlsl;
@@ -88,5 +89,100 @@ fn compute_shader_doubles_each_element() {
         result,
         expected.as_slice(),
         "o compute shader deveria ter dobrado cada elemento"
+    );
+}
+
+/// Como `compute_shader_doubles_each_element`, mas a contagem de grupos
+/// de thread vem de um buffer indirect em vez de ser passada direto a
+/// `dispatch` — prova que `dispatch_indirect` lê os argumentos certos da
+/// GPU, não só que a chamada não falhou.
+#[test]
+fn dispatch_indirect_reads_group_count_from_a_buffer() {
+    let device = Device::new(&DeviceDescriptor::default()).expect("falha ao criar device");
+
+    let input: [f32; 8] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let input_bytes = unsafe {
+        std::slice::from_raw_parts(input.as_ptr() as *const u8, std::mem::size_of_val(&input))
+    };
+
+    let storage_buffer = device
+        .create_buffer_with_data(
+            &BufferDescriptor {
+                size: input_bytes.len() as u64,
+                usage: BufferUsage::Storage,
+                dynamic: false,
+                stride: std::mem::size_of::<f32>() as u32,
+            },
+            input_bytes,
+        )
+        .expect("falha ao criar o structured buffer");
+
+    let uav = device
+        .create_unordered_access_view(&storage_buffer)
+        .expect("falha ao criar a UAV");
+
+    let cs_bytecode = compile_hlsl(SHADER_SOURCE, "cs_main", "cs_5_0")
+        .expect("falha ao compilar o compute shader");
+    let compute_shader = device
+        .create_compute_shader(&cs_bytecode)
+        .expect("falha ao criar o compute shader");
+    let pipeline = device
+        .create_compute_pipeline(&ComputePipelineDescriptor {
+            compute_shader: &compute_shader,
+        })
+        .expect("falha ao criar o compute pipeline");
+
+    let args = DispatchIndirectArgs {
+        thread_group_count_x: 1,
+        thread_group_count_y: 1,
+        thread_group_count_z: 1,
+    };
+    let args_buffer = device
+        .create_buffer_with_data(
+            &BufferDescriptor {
+                size: DispatchIndirectArgs::SIZE,
+                usage: BufferUsage::Indirect,
+                dynamic: false,
+                stride: 0,
+            },
+            &args.to_bytes(),
+        )
+        .expect("falha ao criar o buffer de argumentos indiretos");
+
+    let context = device.context();
+    context.set_compute_pipeline(&pipeline);
+    context
+        .set_unordered_access_view(0, &uav)
+        .expect("invalid UAV slot");
+
+    // Buffer de vertex não serve como fonte de argumentos indiretos.
+    assert!(context.dispatch_indirect(&storage_buffer, 0).is_err());
+
+    context
+        .dispatch_indirect(&args_buffer, 0)
+        .expect("falha ao despachar indiretamente");
+
+    let staging_buffer = device
+        .create_buffer(&BufferDescriptor {
+            size: input_bytes.len() as u64,
+            usage: BufferUsage::Staging,
+            dynamic: false,
+            stride: 0,
+        })
+        .expect("falha ao criar o buffer de staging");
+    context.copy_buffer(&storage_buffer, &staging_buffer);
+
+    let mapped = context
+        .map_read(&staging_buffer)
+        .expect("falha ao mapear o buffer de staging para leitura");
+    let bytes = mapped.as_slice();
+    let result: &[f32] =
+        unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const f32, input.len()) };
+
+    let expected: Vec<f32> = input.iter().map(|x| x * 2.0).collect();
+    assert_eq!(
+        result,
+        expected.as_slice(),
+        "dispatch_indirect deveria ter dobrado cada elemento, como dispatch direto"
     );
 }
