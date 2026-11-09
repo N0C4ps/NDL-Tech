@@ -22,7 +22,7 @@ use crate::core::{PlatformBackendKind, PlatformCapabilities};
 use crate::error::PlatformError;
 use crate::event::Event;
 use crate::monitor::MonitorInfo;
-use crate::window::{WindowDescriptor, WindowId};
+use crate::window::{NativeWindowHandle, WindowDescriptor, WindowId};
 
 /// Contrato interno que todo backend de sistema operacional deve implementar.
 pub(crate) trait Backend {
@@ -41,12 +41,15 @@ pub(crate) trait Backend {
     /// decida encerrar (normalmente ao receber `WindowEvent::CloseRequested`).
     ///
     /// `on_event` recebe tanto eventos de janela (`Event::Window`) quanto
-    /// de ciclo de vida da aplicação (`Event::App`). Backends sem janela
+    /// de ciclo de vida da aplicação (`Event::App`), além de um
+    /// [`NativeWindowHandle`] — é assim que o jogo chega até um handle de
+    /// janela para entregar a `ndl-render` (ou qualquer outra lib
+    /// gráfica), sem que `ndl-platform` dependa dela. Backends sem janela
     /// real (`headless`) retornam [`PlatformError::Unsupported`].
     fn run(
         &self,
         descriptor: WindowDescriptor,
-        on_event: Box<dyn FnMut(Event<()>)>,
+        on_event: Box<dyn FnMut(Event<()>, &NativeWindowHandle)>,
     ) -> Result<(), PlatformError>;
 }
 

@@ -106,7 +106,11 @@ impl Platform {
     ///
     /// `on_event` recebe tanto eventos de janela (`Event::Window`, ex:
     /// teclado, mouse, resize) quanto eventos de ciclo de vida da aplicação
-    /// (`Event::App`, ex: `Suspended`/`Resumed`).
+    /// (`Event::App`, ex: `Suspended`/`Resumed`), além de um
+    /// [`crate::window::NativeWindowHandle`] — é esse handle que o jogo
+    /// repassa para `ndl-render` (ou qualquer outra lib gráfica) para
+    /// conectar a janela ao renderizador; `ndl-platform` nunca faz essa
+    /// conexão por conta própria.
     ///
     /// Esse é o caminho usado por um jogo de verdade — em contraste com
     /// [`Platform::create_window`] + [`crate::event::EventLoop`], que
@@ -116,7 +120,7 @@ impl Platform {
     pub fn run_window(
         &self,
         descriptor: WindowDescriptor,
-        on_event: impl FnMut(Event<()>) + 'static,
+        on_event: impl FnMut(Event<()>, &crate::window::NativeWindowHandle) + 'static,
     ) -> Result<(), PlatformError> {
         self.backend.run(descriptor, Box::new(on_event))
     }

@@ -10,7 +10,7 @@ use crate::core::PlatformCapabilities;
 use crate::error::PlatformError;
 use crate::event::Event;
 use crate::monitor::MonitorInfo;
-use crate::window::{WindowDescriptor, WindowId};
+use crate::window::{NativeWindowHandle, WindowDescriptor, WindowId};
 
 pub(crate) struct HeadlessBackend {
     next_window_id: AtomicU64,
@@ -47,7 +47,7 @@ impl Backend for HeadlessBackend {
     fn run(
         &self,
         _descriptor: WindowDescriptor,
-        _on_event: Box<dyn FnMut(Event<()>)>,
+        _on_event: Box<dyn FnMut(Event<()>, &NativeWindowHandle)>,
     ) -> Result<(), PlatformError> {
         Err(PlatformError::Unsupported(
             "backend headless não abre janelas reais; use PlatformBackendKind::Native",

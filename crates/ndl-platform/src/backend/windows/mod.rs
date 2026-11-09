@@ -5,6 +5,9 @@
 //! para os tipos públicos do `ndl-platform`, mantendo a API da crate
 //! independente de qual biblioteca está por baixo.
 
+use std::rc::Rc;
+
+use raw_window_handle::HasWindowHandle;
 use winit::application::ApplicationHandler;
 use winit::event::{
     ElementState, Ime as WinitIme, Modifiers as WinitModifiers, MouseButton as WinitMouseButton,
@@ -21,7 +24,21 @@ use crate::error::PlatformError;
 use crate::event::{AppEvent, Event, TouchPhase, WindowEvent};
 use crate::input::{KeyCode, KeyState, Modifiers, MouseButton, MouseState};
 use crate::monitor::MonitorInfo;
-use crate::window::{LogicalSize, WindowDescriptor, WindowId};
+use crate::window::{
+    LogicalSize, NativeWindowHandle, NativeWindowOps, RawWindowHandle, WindowDescriptor, WindowId,
+};
+
+impl NativeWindowOps for WinitWindow {
+    fn raw_window_handle(&self) -> RawWindowHandle {
+        self.window_handle()
+            .expect("janela nativa sem handle válido")
+            .as_raw()
+    }
+
+    fn request_redraw(&self) {
+        WinitWindow::request_redraw(self);
+    }
+}
 
 /// Única janela suportada pelo backend nativo por enquanto
 /// (`PlatformCapabilities::multiple_windows == false`).
@@ -67,7 +84,7 @@ impl Backend for WindowsBackend {
     fn run(
         &self,
         descriptor: WindowDescriptor,
-        on_event: Box<dyn FnMut(Event<()>)>,
+        on_event: Box<dyn FnMut(Event<()>, &NativeWindowHandle)>,
     ) -> Result<(), PlatformError> {
         let event_loop =
             EventLoop::new().map_err(|err| PlatformError::Backend(err.to_string()))?;
@@ -76,6 +93,7 @@ impl Backend for WindowsBackend {
             descriptor,
             on_event,
             window: None,
+            native_handle: None,
             winit_window_id: None,
             modifiers: Modifiers::NONE,
             started: false,
@@ -89,8 +107,11 @@ impl Backend for WindowsBackend {
 
 struct App {
     descriptor: WindowDescriptor,
-    on_event: Box<dyn FnMut(Event<()>)>,
-    window: Option<WinitWindow>,
+    on_event: Box<dyn FnMut(Event<()>, &NativeWindowHandle)>,
+    window: Option<Rc<WinitWindow>>,
+    /// Handle estável entregue a `on_event` — cacheado na criação da
+    /// janela para não recomputar o raw handle a cada evento.
+    native_handle: Option<NativeWindowHandle>,
     winit_window_id: Option<WinitWindowId>,
     /// Último estado conhecido dos modificadores (shift/ctrl/alt/super),
     /// atualizado por `WindowEvent::ModifiersChanged` e aplicado aos
@@ -102,10 +123,23 @@ struct App {
 
 impl App {
     fn emit(&mut self, event: WindowEvent) {
-        (self.on_event)(Event::Window {
-            window_id: SINGLE_WINDOW_ID,
-            event,
-        });
+        let Some(handle) = self.native_handle.as_ref() else {
+            return;
+        };
+        (self.on_event)(
+            Event::Window {
+                window_id: SINGLE_WINDOW_ID,
+                event,
+            },
+            handle,
+        );
+    }
+
+    fn emit_app_event(&mut self, event: AppEvent) {
+        let Some(handle) = self.native_handle.as_ref() else {
+            return;
+        };
+        (self.on_event)(Event::App(event), handle);
     }
 }
 
@@ -120,7 +154,7 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             // Não é a primeira vez (ex: app voltou de segundo plano) —
             // notifica como evento de ciclo de vida, não recria a janela.
-            (self.on_event)(Event::App(AppEvent::Resumed));
+            self.emit_app_event(AppEvent::Resumed);
             return;
         }
 
@@ -139,10 +173,14 @@ impl ApplicationHandler for App {
         match event_loop.create_window(attrs) {
             Ok(window) => {
                 self.winit_window_id = Some(window.id());
+                let window = Rc::new(window);
+                let ops: Rc<dyn NativeWindowOps> = window.clone();
+                self.native_handle = Some(NativeWindowHandle::new(ops));
                 self.window = Some(window);
+
                 if !self.started {
                     self.started = true;
-                    (self.on_event)(Event::App(AppEvent::Started));
+                    self.emit_app_event(AppEvent::Started);
                 }
             }
             Err(err) => {
@@ -153,7 +191,7 @@ impl ApplicationHandler for App {
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
-        (self.on_event)(Event::App(AppEvent::Suspended));
+        self.emit_app_event(AppEvent::Suspended);
     }
 
     fn window_event(
