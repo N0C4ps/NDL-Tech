@@ -183,8 +183,10 @@ fn records_draw_in_a_deferred_context_and_submits_to_the_queue() {
         .expect("falha ao criar vertex buffer");
 
     let queue = device.queue();
+    let background = [0.08, 0.05, 0.1, 1.0];
+    let mut last_capture = None;
 
-    for _ in 0..15 {
+    for i in 0..15 {
         pump_messages();
 
         let view = swapchain
@@ -197,7 +199,7 @@ fn records_draw_in_a_deferred_context_and_submits_to_the_queue() {
             .create_command_encoder()
             .expect("falha ao criar command encoder");
         encoder.set_render_target(view);
-        encoder.clear_render_target(view, [0.08, 0.05, 0.1, 1.0]);
+        encoder.clear_render_target(view, background);
         encoder.set_viewport(Viewport::full(800.0, 600.0));
         encoder.set_pipeline(&pipeline);
         encoder.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32);
@@ -208,9 +210,24 @@ fn records_draw_in_a_deferred_context_and_submits_to_the_queue() {
         queue.submit(&[command_buffer]).expect("falha ao submeter");
         queue.wait_idle().expect("falha ao esperar a GPU");
 
+        if i == 14 {
+            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+        }
+
         swapchain.present().expect("falha ao apresentar");
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    // O desenho foi gravado num CommandEncoder (contexto diferido) e só
+    // executou na GPU depois do submit — se isso não funcionasse de
+    // verdade, nada teria sido desenhado e o centro seria a cor de fundo.
+    let capture = last_capture.expect("deveria ter capturado o último quadro");
+    let outside = capture.pixel_rgba(10, 10);
+    let center = capture.pixel_rgba(400, 300);
+    assert!(
+        (center[0] as i16 - outside[0] as i16).abs() + (center[2] as i16 - outside[2] as i16).abs() > 20,
+        "centro do triângulo (desenhado via CommandEncoder/Queue) deveria ser diferente do fundo; centro={center:?} fundo={outside:?}"
+    );
 
     unsafe {
         let _ = DestroyWindow(hwnd);

@@ -181,14 +181,13 @@ fn transfer_query_sync_and_debug_markers() {
         )
         .expect("falha ao criar vertex buffer");
 
-    // transfer: copia o vertex buffer para um segundo buffer idêntico —
-    // só precisa não paniciar, provando que CopyResource funciona.
+    // transfer: copia o vertex buffer para um segundo buffer idêntico.
     let vertex_buffer_copy = device
         .create_buffer(&BufferDescriptor {
             size: vertex_bytes.len() as u64,
             usage: BufferUsage::Vertex,
             dynamic: false,
-                stride: 0,
+            stride: 0,
         })
         .expect("falha ao criar o buffer de destino da cópia");
 
@@ -203,7 +202,34 @@ fn transfer_query_sync_and_debug_markers() {
     let context = device.context();
     context.copy_buffer(&vertex_buffer, &vertex_buffer_copy);
 
-    for _ in 0..15 {
+    // Valida de verdade que a cópia levou os bytes certos, em vez de só
+    // confiar que `CopyResource` não quebrou: copia o resultado pra um
+    // buffer de staging (legível pela CPU) e compara byte a byte com os
+    // dados originais.
+    let staging_buffer = device
+        .create_buffer(&BufferDescriptor {
+            size: vertex_bytes.len() as u64,
+            usage: BufferUsage::Staging,
+            dynamic: false,
+            stride: 0,
+        })
+        .expect("falha ao criar o buffer de staging");
+    context.copy_buffer(&vertex_buffer_copy, &staging_buffer);
+    {
+        let mapped = context
+            .map_read(&staging_buffer)
+            .expect("falha ao mapear o buffer de staging para leitura");
+        assert_eq!(
+            mapped.as_slice(),
+            vertex_bytes,
+            "a cópia via CopyResource deveria ter levado os bytes originais do vertex buffer"
+        );
+    }
+
+    let mut last_capture = None;
+    let background = [0.05, 0.05, 0.08, 1.0];
+
+    for i in 0..15 {
         pump_messages();
 
         let view = swapchain
@@ -214,7 +240,7 @@ fn transfer_query_sync_and_debug_markers() {
         // marcador pontual logo antes do draw em si.
         context.push_debug_group("frame");
         context.set_render_target(view);
-        context.clear_render_target(view, [0.05, 0.05, 0.08, 1.0]);
+        context.clear_render_target(view, background);
         context.set_viewport(Viewport::full(800.0, 600.0));
         context.set_pipeline(&pipeline);
         context.set_vertex_buffer(0, &vertex_buffer_copy, std::mem::size_of::<Vertex>() as u32);
@@ -228,9 +254,24 @@ fn transfer_query_sync_and_debug_markers() {
         fence.signal(&context);
         fence.wait(&context);
 
+        if i == 14 {
+            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+        }
+
         swapchain.present().expect("falha ao apresentar");
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    // O triângulo foi desenhado a partir de vertex_buffer_copy — se a
+    // cópia (já validada acima) e o draw funcionaram, o centroide do
+    // triângulo não deve ser a cor de fundo.
+    let capture = last_capture.expect("deveria ter capturado o último quadro");
+    let outside = capture.pixel_rgba(10, 10);
+    let center = capture.pixel_rgba(400, 300);
+    assert!(
+        (center[0] as i16 - outside[0] as i16).abs() + (center[2] as i16 - outside[2] as i16).abs() > 20,
+        "centro do triângulo (desenhado a partir da cópia) deveria ser diferente do fundo; centro={center:?} fundo={outside:?}"
+    );
 
     // A query de oclusão deve estar pronta a essa altura — a fence já
     // esperou a GPU terminar o último quadro, que é posterior ao

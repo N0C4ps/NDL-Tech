@@ -234,15 +234,17 @@ fn depth_test_and_blend_with_indexed_draws() {
         .expect("falha ao criar index buffer");
 
     let context = device.context();
+    let background = [0.05, 0.05, 0.08, 1.0];
+    let mut last_capture = None;
 
-    for _ in 0..20 {
+    for i in 0..20 {
         pump_messages();
 
         let color_view = swapchain
             .render_target_view(&device)
             .expect("falha ao obter a render target view");
         context.set_render_target_with_depth(color_view, &depth_view);
-        context.clear_render_target(color_view, [0.05, 0.05, 0.08, 1.0]);
+        context.clear_render_target(color_view, background);
         context.clear_depth(&depth_view, 1.0);
         context.set_viewport(Viewport::full(800.0, 600.0));
         context.set_depth_stencil_state(&depth_state);
@@ -261,9 +263,51 @@ fn depth_test_and_blend_with_indexed_draws() {
         context.set_blend_state(&alpha_blend);
         context.draw_indexed(6, 6, 0);
 
+        if i == 19 {
+            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+        }
+
         swapchain.present().expect("falha ao apresentar");
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    // Os dois triângulos (vermelho em z=0.8, verde em z=0.2) cobrem
+    // exatamente a mesma região da tela — se o depth test estiver
+    // funcionando de verdade (e não só "o último desenhado venceu"),
+    // o verde (mais perto) tem que aparecer, nunca o vermelho, apesar do
+    // vermelho ter sido desenhado DEPOIS na ordem dos draw_indexed.
+    //
+    // Ponto perto do ápice do triângulo (NDC (0, 0.5) -> pixel (400, 150)),
+    // fora da área do quad azul (NDC y em [-0.3, 0.3]).
+    let capture = last_capture.expect("deveria ter capturado o último quadro");
+
+    let depth_test_point = capture.pixel_rgba(400, 150);
+    assert!(
+        depth_test_point[1] > 150 && depth_test_point[0] < 80,
+        "depth test deveria mostrar o triângulo verde (mais perto), não o vermelho (mais longe); obtido {depth_test_point:?}"
+    );
+
+    // Fora de tudo (canto) continua com a cor de fundo.
+    let outside = capture.pixel_rgba(10, 10);
+    assert!(
+        (outside[0] as i16 - 13).abs() <= 3,
+        "fora de toda a geometria deveria ser a cor de fundo, obtido {outside:?}"
+    );
+
+    // Centro: dentro do triângulo verde E do quad azul semi-transparente
+    // (alpha 0.4). Se o blend estivesse substituindo em vez de misturar,
+    // o pixel seria azul puro (0, 76, 255) ou, se o blend não fizesse
+    // nada, verde puro (0, 255, 0). Uma mistura real tem os dois canais
+    // (verde e azul) claramente presentes, nenhum dos dois nos extremos.
+    let blended = capture.pixel_rgba(400, 300);
+    assert!(
+        blended[1] > 40 && blended[1] < 230,
+        "canal verde deveria estar misturado, não puro nem ausente; obtido {blended:?}"
+    );
+    assert!(
+        blended[2] > 40 && blended[2] < 230,
+        "canal azul deveria estar misturado, não puro nem ausente; obtido {blended:?}"
+    );
 
     unsafe {
         let _ = DestroyWindow(hwnd);

@@ -197,23 +197,62 @@ fn draws_a_colored_triangle() {
         .expect("falha ao criar vertex buffer");
 
     let context = device.context();
+    let background = [0.05, 0.05, 0.08, 1.0];
+    let mut last_capture = None;
 
-    for _ in 0..20 {
+    for i in 0..20 {
         pump_messages();
 
         let view = swapchain
             .render_target_view(&device)
             .expect("falha ao obter a render target view");
         context.set_render_target(view);
-        context.clear_render_target(view, [0.05, 0.05, 0.08, 1.0]);
+        context.clear_render_target(view, background);
         context.set_viewport(Viewport::full(800.0, 600.0));
         context.set_pipeline(&pipeline);
         context.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32);
         context.draw(3, 0);
 
+        if i == 19 {
+            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+        }
+
         swapchain.present().expect("falha ao apresentar");
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    // Valida de verdade que o triângulo foi desenhado no lugar certo com
+    // as cores certas, em vez de só confiar que os draw calls não
+    // quebraram.
+    //
+    // Vértices em coordenadas de tela (NDC -> pixel, 800x600):
+    //   topo    (0.0,  0.5) -> (400, 150), vermelho
+    //   dir-bx  (0.5, -0.5) -> (600, 450), verde
+    //   esq-bx (-0.5, -0.5) -> (200, 450), azul
+    let capture = last_capture.expect("deveria ter capturado o último quadro");
+
+    // Fora do triângulo (canto) continua com a cor de fundo.
+    let outside = capture.pixel_rgba(10, 10);
+    assert!(
+        (outside[0] as i16 - 13).abs() <= 3 && (outside[2] as i16 - 20).abs() <= 3,
+        "pixel fora do triângulo deveria ser a cor de fundo, obtido {outside:?}"
+    );
+
+    // Perto do vértice de cima, a cor deve ser predominantemente vermelha.
+    let near_top = capture.pixel_rgba(400, 170);
+    assert!(
+        near_top[0] > 150 && near_top[0] > near_top[1] + 30 && near_top[0] > near_top[2] + 30,
+        "pixel perto do vértice de cima deveria ser predominantemente vermelho, obtido {near_top:?}"
+    );
+
+    // O centroide do triângulo (dentro dele) não deve ser a cor de fundo.
+    let center = capture.pixel_rgba(400, 350);
+    let diff_from_background =
+        (center[0] as i16 - outside[0] as i16).abs() + (center[2] as i16 - outside[2] as i16).abs();
+    assert!(
+        diff_from_background > 20,
+        "centro do triângulo deveria ser visivelmente diferente do fundo, obtido {center:?} vs fundo {outside:?}"
+    );
 
     unsafe {
         let _ = DestroyWindow(hwnd);

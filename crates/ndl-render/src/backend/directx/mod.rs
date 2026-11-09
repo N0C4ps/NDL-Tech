@@ -1072,6 +1072,81 @@ pub(crate) fn create_swapchain_render_target_view(
 }
 
 /// Apresenta o quadro atual da swapchain.
+/// Lê de volta o back buffer atual da swapchain, como pixels crus e
+/// compactados (sem o padding de linha que a GPU usa internamente) —
+/// usado para validar de verdade o que foi desenhado (ver
+/// `crate::surface::Swapchain::capture_frame`), em vez de só confiar que
+/// a chamada não quebrou.
+pub(crate) fn capture_swapchain_frame(
+    device: &Device,
+    raw: &RawSwapchain,
+) -> Result<(u32, u32, crate::format::Format, Vec<u8>), GraphicsError> {
+    use windows::Win32::Graphics::Direct3D11::D3D11_MAP_READ;
+
+    let back_buffer: ID3D11Texture2D = unsafe { raw.swapchain.GetBuffer(0) }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    unsafe {
+        back_buffer.GetDesc(&mut desc);
+    }
+
+    let staging_desc = D3D11_TEXTURE2D_DESC {
+        Width: desc.Width,
+        Height: desc.Height,
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: desc.Format,
+        SampleDesc: desc.SampleDesc,
+        Usage: windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING,
+        BindFlags: 0,
+        CPUAccessFlags: windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ.0 as u32,
+        MiscFlags: 0,
+    };
+
+    let mut staging: Option<ID3D11Texture2D> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateTexture2D(&staging_desc, None, Some(&mut staging))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let staging = staging.ok_or_else(|| {
+        GraphicsError::Backend("CreateTexture2D (staging de captura) não retornou uma textura".into())
+    })?;
+
+    unsafe {
+        device.raw.context.CopyResource(&staging, &back_buffer);
+    }
+
+    let format = crate::format::Format::from_dxgi_format(desc.Format)
+        .ok_or(GraphicsError::Unsupported("formato do back buffer sem mapeamento conhecido"))?;
+    let bytes_per_pixel = format.bits_per_pixel() / 8;
+
+    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+    unsafe {
+        device
+            .raw
+            .context
+            .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let mut pixels = vec![0u8; (desc.Width * desc.Height * bytes_per_pixel) as usize];
+    unsafe {
+        for row in 0..desc.Height {
+            let src = (mapped.pData as *const u8).add((row * mapped.RowPitch) as usize);
+            let dst_offset = (row * desc.Width * bytes_per_pixel) as usize;
+            let row_bytes = (desc.Width * bytes_per_pixel) as usize;
+            std::ptr::copy_nonoverlapping(src, pixels.as_mut_ptr().add(dst_offset), row_bytes);
+        }
+        device.raw.context.Unmap(&staging, 0);
+    }
+
+    Ok((desc.Width, desc.Height, format, pixels))
+}
+
 pub(crate) fn present(raw: &RawSwapchain, present_mode: PresentMode) -> Result<PresentResult, GraphicsError> {
     // VSync por padrão: "liso" numa GPU topo de linha não significa nada
     // numa GPU mais modesta — nunca presumimos Immediate sem o jogo pedir.

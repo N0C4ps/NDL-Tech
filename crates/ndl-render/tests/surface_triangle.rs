@@ -69,6 +69,27 @@ fn pump_messages() {
     }
 }
 
+/// Converte uma cor float RGBA (0.0-1.0) para bytes unorm (0-255) e
+/// compara com tolerância contra um pixel já convertido por
+/// `FrameCapture::pixel_rgba`.
+fn assert_color_close(actual_rgba: [u8; 4], expected_float: [f32; 4]) {
+    let expected: Vec<u8> = expected_float
+        .iter()
+        .map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+    for i in 0..4 {
+        let diff = (actual_rgba[i] as i16 - expected[i] as i16).abs();
+        assert!(
+            diff <= 2,
+            "canal {} do pixel: esperado ~{}, obtido {} (diff {})",
+            ["r", "g", "b", "a"][i],
+            expected[i],
+            actual_rgba[i],
+            diff
+        );
+    }
+}
+
 #[test]
 fn clears_a_real_window_to_a_color() {
     let hwnd = create_raw_window(800, 600);
@@ -90,16 +111,31 @@ fn clears_a_real_window_to_a_color() {
     )
     .expect("falha ao criar swapchain");
 
-    // Limpa por alguns quadros com uma cor visível (azul NDL) — se isso
-    // não paniciar e a janela aparecer pintada, o caminho inteiro
-    // device -> surface -> swapchain -> clear -> present está funcionando.
-    for _ in 0..30 {
+    let clear_color = [0.1, 0.2, 0.6, 1.0];
+    let mut last_capture = None;
+
+    // Limpa por alguns quadros com uma cor visível (azul NDL).
+    for i in 0..30 {
         pump_messages();
-        swapchain
-            .clear_and_present(&device, [0.1, 0.2, 0.6, 1.0])
-            .expect("falha ao limpar/apresentar");
+        let view = swapchain
+            .render_target_view(&device)
+            .expect("falha ao obter a render target view");
+        device.context().clear_render_target(view, clear_color);
+
+        if i == 29 {
+            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+        }
+
+        swapchain.present().expect("falha ao apresentar");
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    // Valida de verdade que o back buffer foi limpo com a cor certa, em
+    // vez de só confiar que a sequência de chamadas não quebrou.
+    let capture = last_capture.expect("deveria ter capturado o último quadro");
+    assert_color_close(capture.pixel_rgba(400, 300), clear_color);
+    assert_color_close(capture.pixel_rgba(10, 10), clear_color);
+    assert_color_close(capture.pixel_rgba(790, 590), clear_color);
 
     unsafe {
         let _ = DestroyWindow(hwnd);
@@ -130,18 +166,28 @@ fn clears_using_context_and_view_directly() {
     .expect("falha ao criar swapchain");
 
     let context: Context = device.context();
+    let clear_color = [0.8, 0.1, 0.1, 1.0];
+    let mut last_capture = None;
 
-    for _ in 0..10 {
+    for i in 0..10 {
         pump_messages();
         let view = swapchain
             .render_target_view(&device)
             .expect("falha ao obter a render target view");
         context.set_render_target(view);
-        context.clear_render_target(view, [0.8, 0.1, 0.1, 1.0]);
+        context.clear_render_target(view, clear_color);
         context.flush();
+
+        if i == 9 {
+            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+        }
+
         swapchain.present().expect("falha ao apresentar");
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    let capture = last_capture.expect("deveria ter capturado o último quadro");
+    assert_color_close(capture.pixel_rgba(320, 240), clear_color);
 
     unsafe {
         let _ = DestroyWindow(hwnd);

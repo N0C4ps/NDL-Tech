@@ -216,4 +216,74 @@ impl Swapchain {
         context.clear_render_target(view, color);
         self.present()
     }
+
+    /// Lê de volta o conteúdo atual do back buffer, como pixels crus —
+    /// para validar de verdade o que foi desenhado (ex: em testes), em
+    /// vez de só confiar que o desenho não quebrou. Chame **antes** de
+    /// `present()`, enquanto o back buffer ainda tem o quadro atual.
+    pub fn capture_frame(&self, device: &Device) -> Result<FrameCapture, GraphicsError> {
+        #[cfg(target_os = "windows")]
+        {
+            let (width, height, format, pixels) =
+                crate::backend::directx::capture_swapchain_frame(device, &self.raw)?;
+            return Ok(FrameCapture {
+                width,
+                height,
+                format,
+                pixels,
+            });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = device;
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+}
+
+/// Uma cópia dos pixels de um quadro, lida de volta da GPU — ver
+/// [`Swapchain::capture_frame`].
+pub struct FrameCapture {
+    width: u32,
+    height: u32,
+    format: Format,
+    /// Pixels compactados (sem padding de linha), `width * height *
+    /// bytes_per_pixel(format)` bytes, linha a linha de cima para baixo.
+    pixels: Vec<u8>,
+}
+
+impl FrameCapture {
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn format(&self) -> Format {
+        self.format
+    }
+
+    /// O pixel em `(x, y)`, como bytes crus no formato original (ex: 4
+    /// bytes BGRA para `Format::Bgra8Unorm`, o formato comum de
+    /// swapchain). Entra em pânico se `(x, y)` estiver fora dos limites.
+    pub fn pixel(&self, x: u32, y: u32) -> &[u8] {
+        assert!(x < self.width && y < self.height, "pixel ({x}, {y}) fora dos limites ({}, {})", self.width, self.height);
+        let bytes_per_pixel = (self.format.bits_per_pixel() / 8) as usize;
+        let offset = (y as usize * self.width as usize + x as usize) * bytes_per_pixel;
+        &self.pixels[offset..offset + bytes_per_pixel]
+    }
+
+    /// `pixel(x, y)` interpretado como BGRA8 (`[b, g, r, a]`), convertido
+    /// para `[r, g, b, a]` — conveniência para formatos comuns de
+    /// swapchain (`Bgra8Unorm`/`Bgra8UnormSrgb`). Entra em pânico se o
+    /// formato não tiver 4 bytes por pixel.
+    pub fn pixel_rgba(&self, x: u32, y: u32) -> [u8; 4] {
+        let raw = self.pixel(x, y);
+        assert_eq!(raw.len(), 4, "pixel_rgba só funciona com formatos de 4 bytes por pixel");
+        [raw[2], raw[1], raw[0], raw[3]]
+    }
 }

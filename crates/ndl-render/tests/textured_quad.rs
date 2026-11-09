@@ -247,6 +247,8 @@ fn draws_a_textured_pulsing_quad() {
         .expect("falha ao criar constant buffer");
 
     let context = device.context();
+    let background = [0.05, 0.05, 0.08, 1.0];
+    let mut first_frame_capture = None;
 
     for frame in 0..20 {
         pump_messages();
@@ -262,7 +264,7 @@ fn draws_a_textured_pulsing_quad() {
             .render_target_view(&device)
             .expect("falha ao obter a render target view");
         context.set_render_target(view);
-        context.clear_render_target(view, [0.05, 0.05, 0.08, 1.0]);
+        context.clear_render_target(view, background);
         context.set_viewport(Viewport::full(800.0, 600.0));
         context.set_pipeline(&pipeline);
         context.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32);
@@ -271,9 +273,41 @@ fn draws_a_textured_pulsing_quad() {
         context.set_sampler(0, &sampler);
         context.draw(6, 0);
 
+        // No quadro 0, `scale` é exatamente 0.6 (sin(0) = 0) — captura
+        // aqui porque dá pra calcular de antemão onde o quad cai na tela.
+        if frame == 0 {
+            first_frame_capture =
+                Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+        }
+
         swapchain.present().expect("falha ao apresentar");
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    // Com scale = 0.6, o quad (NDC base [-0.5, 0.5]) ocupa NDC
+    // [-0.3, 0.3] em x e y — em pixels (800x600): x em [280, 520], y em
+    // [210, 390]. A textura é um checkerboard 2x2 (branco, preto / preto,
+    // branco) amostrada com filtro de ponto, então cada quadrante do quad
+    // deve mostrar uma cor sólida previsível.
+    let capture = first_frame_capture.expect("deveria ter capturado o primeiro quadro");
+
+    let outside = capture.pixel_rgba(10, 10);
+    assert!(
+        (outside[0] as i16 - 13).abs() <= 3,
+        "fora do quad deveria ser a cor de fundo, obtido {outside:?}"
+    );
+
+    let top_left = capture.pixel_rgba(340, 255); // uv ~ (0.25, 0.25) -> branco
+    assert!(top_left[0] > 200, "quadrante uv(0.25,0.25) deveria ser branco, obtido {top_left:?}");
+
+    let top_right = capture.pixel_rgba(460, 255); // uv ~ (0.75, 0.25) -> preto
+    assert!(top_right[0] < 50, "quadrante uv(0.75,0.25) deveria ser preto, obtido {top_right:?}");
+
+    let bottom_left = capture.pixel_rgba(340, 345); // uv ~ (0.25, 0.75) -> preto
+    assert!(bottom_left[0] < 50, "quadrante uv(0.25,0.75) deveria ser preto, obtido {bottom_left:?}");
+
+    let bottom_right = capture.pixel_rgba(460, 345); // uv ~ (0.75, 0.75) -> branco
+    assert!(bottom_right[0] > 200, "quadrante uv(0.75,0.75) deveria ser branco, obtido {bottom_right:?}");
 
     unsafe {
         let _ = DestroyWindow(hwnd);

@@ -47,15 +47,21 @@ funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
 árvore de módulos como stubs reservados para a integração real com cada SO.
 
 Todos os 25 módulos planejados de `ndl-render` já têm implementação real
-contra o backend Direct3D 11. Além de tudo que já fazia (device/adapter,
-surface/swapchain, buffers, shaders HLSL, texturas/sampler, pipeline,
-depth/blend, contextos diferidos/fila, alocadores de alto nível, cópias,
-queries, sincronização, debug), `compute` agora cobre compute shader
-(`shader::ComputeShader`), structured buffers lidos/escritos por GPU
-(`BufferUsage::Storage` + `UnorderedAccessView`), `ComputePipeline` e
-`Context::dispatch`. Buffers de staging (`BufferUsage::Staging`) e
-`Context::map_read` completam o ciclo, permitindo ler de volta o que um
-compute shader escreveu.
+contra o backend Direct3D 11: device/adapter, surface/swapchain, buffers
+(vertex/index/constant/storage/staging), shaders HLSL (vertex/pixel/
+compute), texturas/sampler, pipeline (gráfico e de computação), depth/
+blend, contextos diferidos/fila, alocadores de alto nível, cópias,
+queries, sincronização e debug.
+
+Os testes de renderização não só checam "não quebrou" — `Swapchain::capture_frame`
+lê de volta os pixels reais do back buffer (via staging texture), e os
+testes comparam contra o resultado esperado calculado a partir da
+geometria/transformação/amostragem de textura. Isso já pegou um erro real
+de teste (um ponto de verificação caindo exatamente sobre um vértice, com
+área zero) — a validação é sensível, não decorativa. O mesmo vale para
+`Context::copy_buffer`: um teste lê de volta o buffer copiado via
+`Context::map_read` e compara byte a byte com o original, em vez de só
+confiar que `CopyResource` não lançou erro.
 
 `CommandEncoder` reaproveita a própria `Context` por baixo (via `Deref`) —
 no D3D11, um contexto diferido é a mesma interface do contexto imediato,

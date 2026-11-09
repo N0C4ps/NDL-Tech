@@ -209,6 +209,8 @@ fn constant_buffer_ring_and_resource_labels() {
         .expect("falha ao criar o constant buffer ring");
 
     let context = device.context();
+    let background = [0.05, 0.05, 0.08, 1.0];
+    let mut first_frame_capture = None;
 
     for frame in 0..20 {
         pump_messages();
@@ -224,16 +226,46 @@ fn constant_buffer_ring_and_resource_labels() {
             .render_target_view(&device)
             .expect("falha ao obter a render target view");
         context.set_render_target(view);
-        context.clear_render_target(view, [0.05, 0.05, 0.08, 1.0]);
+        context.clear_render_target(view, background);
         context.set_viewport(Viewport::full(800.0, 600.0));
         context.set_pipeline(&pipeline);
         context.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32);
         context.set_constant_buffer(0, transform_buffer);
         context.draw(3, 0);
 
+        // No quadro 0, scale = 0.5 (sin(0) = 0) — captura aqui porque dá
+        // pra calcular de antemão onde o triângulo cai na tela.
+        if frame == 0 {
+            first_frame_capture =
+                Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+        }
+
         swapchain.present().expect("falha ao apresentar");
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    // Com scale = 0.5, o triângulo escalado tem vértices em NDC
+    // (0, 0.25), (0.25, -0.25) e (-0.25, -0.25) — o centroide, bem
+    // dentro do triângulo (não na borda nem no vértice, onde a área é
+    // zero), cai em NDC (0, -0.0833) -> pixel (400, 325). Isso só é
+    // verdade se o ConstantBufferRing realmente escreveu a matriz via
+    // map_write_discard e o shader aplicou a transformação.
+    let capture = first_frame_capture.expect("deveria ter capturado o primeiro quadro");
+    let outside = capture.pixel_rgba(10, 10);
+    let centroid = capture.pixel_rgba(400, 325);
+    assert!(
+        (centroid[0] as i16 - outside[0] as i16).abs()
+            + (centroid[2] as i16 - outside[2] as i16).abs()
+            > 20,
+        "centroide do triângulo transformado deveria ser diferente do fundo; obtido {centroid:?} vs fundo {outside:?}"
+    );
+
+    // Fora do triângulo (mesmo escalado, a 0.5 ele não chega nem perto
+    // dos cantos) continua com a cor de fundo.
+    assert!(
+        (outside[0] as i16 - 13).abs() <= 3,
+        "fora do triângulo deveria ser a cor de fundo, obtido {outside:?}"
+    );
 
     unsafe {
         let _ = DestroyWindow(hwnd);
