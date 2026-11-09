@@ -83,6 +83,12 @@ struct App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        // `Wait`: o loop só roda de novo quando houver um evento real do SO
+        // (input, resize, ...), em vez do padrão `Poll`, que giraria sem
+        // parar gerando `RedrawRequested` infinitamente mesmo sem nada
+        // para redesenhar.
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+
         if self.window.is_some() {
             return;
         }
@@ -122,16 +128,9 @@ impl ApplicationHandler for App {
         }
 
         let should_exit = matches!(event, WinitWindowEvent::CloseRequested);
-        let should_redraw = matches!(event, WinitWindowEvent::RedrawRequested);
 
         if let Some(mapped) = map_window_event(&event) {
             (self.on_event)(mapped);
-        }
-
-        if should_redraw {
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
         }
 
         if should_exit {
