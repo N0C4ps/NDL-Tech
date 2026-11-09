@@ -56,9 +56,7 @@ use crate::surface::{PresentMode, PresentResult, Surface, SwapchainDescriptor};
 /// Dispositivo D3D11 já criado: o device, o contexto imediato e o nível
 /// de recurso que a GPU/driver realmente concedeu.
 pub(crate) struct RawDevice {
-    #[allow(dead_code)] // usado pelos módulos de recurso (buffer/texture/...) quando existirem
     pub(crate) device: ID3D11Device,
-    #[allow(dead_code)] // usado por `context`/`command` quando existirem
     pub(crate) context: ID3D11DeviceContext,
     pub(crate) feature_level: D3D_FEATURE_LEVEL,
 }

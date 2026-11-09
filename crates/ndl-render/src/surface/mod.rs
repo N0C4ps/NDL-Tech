@@ -17,6 +17,7 @@
 
 use raw_window_handle::RawWindowHandle;
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::core::{Device, GraphicsError};
 use crate::format::Format;
 use crate::view::RenderTargetView;
@@ -79,30 +80,18 @@ impl Default for SwapchainDescriptor {
 /// Uma superfície de apresentação, associada a uma janela via
 /// [`raw_window_handle::RawWindowHandle`].
 pub struct Surface {
-    #[cfg(target_os = "windows")]
-    pub(crate) hwnd: windows::Win32::Foundation::HWND,
+    pub(crate) hwnd: <ActiveBackend as Backend>::RawSurface,
 }
 
 impl Surface {
     pub fn from_window_handle(handle: RawWindowHandle) -> Result<Self, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::surface_from_handle(handle);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = handle;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::surface_from_handle(handle)
     }
 }
 
 /// Cadeia de troca de buffers (swapchain) de uma [`Surface`].
 pub struct Swapchain {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: crate::backend::directx::RawSwapchain,
+    pub(crate) raw: <ActiveBackend as Backend>::RawSwapchain,
     size: Extent2D,
     format: Format,
     present_mode: PresentMode,
@@ -140,24 +129,14 @@ impl Swapchain {
                 feature: format!("render target de swapchain no formato {:?}", desc.format),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            let raw = crate::backend::directx::create_swapchain(device, surface, desc)?;
-            return Ok(Self {
-                raw,
-                size: desc.size,
-                format: desc.format,
-                present_mode: desc.present_mode,
-                render_target_view: None,
-            });
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (device, surface, desc);
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        let raw = ActiveBackend::create_swapchain(device, surface, desc)?;
+        Ok(Self {
+            raw,
+            size: desc.size,
+            format: desc.format,
+            present_mode: desc.present_mode,
+            render_target_view: None,
+        })
     }
 
     pub fn format(&self) -> Format {
@@ -188,10 +167,7 @@ impl Swapchain {
         // depois do resize, então é descartada e recriada sob demanda.
         self.render_target_view = None;
 
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::resize_swapchain(&mut self.raw, width, height)?;
-        }
+        ActiveBackend::resize_swapchain(&mut self.raw, width, height)?;
         self.size = Extent2D::new(width, height);
         Ok(())
     }
@@ -203,23 +179,13 @@ impl Swapchain {
         device: &Device,
     ) -> Result<&RenderTargetView, GraphicsError> {
         if self.render_target_view.is_none() {
-            #[cfg(target_os = "windows")]
-            {
-                let view = crate::backend::directx::create_swapchain_render_target_view(
-                    device,
-                    &self.raw,
-                    self.size,
-                    self.format,
-                )?;
-                self.render_target_view = Some(view);
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                let _ = device;
-                return Err(GraphicsError::Unsupported(
-                    "nenhum backend gráfico implementado para este SO ainda",
-                ));
-            }
+            let view = ActiveBackend::create_swapchain_render_target_view(
+                device,
+                &self.raw,
+                self.size,
+                self.format,
+            )?;
+            self.render_target_view = Some(view);
         }
         Ok(self
             .render_target_view
@@ -229,16 +195,7 @@ impl Swapchain {
 
     /// Apresenta o quadro atual.
     pub fn present(&self) -> Result<PresentResult, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::present(&self.raw, self.present_mode);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::present(&self.raw, self.present_mode)
     }
 
     /// Limpa o back buffer atual com a cor dada e apresenta o quadro.
@@ -263,19 +220,9 @@ impl Swapchain {
     /// vez de só confiar que o desenho não quebrou. Chame **antes** de
     /// `present()`, enquanto o back buffer ainda tem o quadro atual.
     pub fn capture_frame(&self, device: &Device) -> Result<FrameCapture, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            let (width, height, format, pixels) =
-                crate::backend::directx::capture_swapchain_frame(device, &self.raw)?;
-            return Ok(FrameCapture::new(width, height, format, pixels));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = device;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        let (width, height, format, pixels) =
+            ActiveBackend::capture_swapchain_frame(device, &self.raw)?;
+        Ok(FrameCapture::new(width, height, format, pixels))
     }
 }
 

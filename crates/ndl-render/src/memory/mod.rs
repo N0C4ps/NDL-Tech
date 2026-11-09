@@ -15,6 +15,7 @@
 //! `UploadArena`, `StagingPool`, `TransientResourcePool` e `ResourceCache`
 //! continuam reservados.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::buffer::{Buffer, BufferDescriptor, BufferUsage};
 use crate::context::Context;
 use crate::core::{Device, GraphicsError};
@@ -30,7 +31,6 @@ use crate::core::{Device, GraphicsError};
 pub struct MappedBuffer<'a> {
     pub(crate) context: &'a Context,
     pub(crate) buffer: &'a Buffer,
-    #[cfg(target_os = "windows")]
     pub(crate) ptr: *mut u8,
     pub(crate) size: usize,
 }
@@ -47,13 +47,8 @@ impl MappedBuffer<'_> {
                 limit: self.size as u64,
             });
         }
-        #[cfg(target_os = "windows")]
         unsafe {
             std::ptr::copy_nonoverlapping(data.as_ptr(), self.ptr, data.len());
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = data;
         }
         Ok(())
     }
@@ -61,14 +56,7 @@ impl MappedBuffer<'_> {
 
 impl Drop for MappedBuffer<'_> {
     fn drop(&mut self) {
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::unmap_buffer(self.context, self.buffer);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (self.context, self.buffer);
-        }
+        ActiveBackend::unmap_buffer(self.context, self.buffer);
     }
 }
 
@@ -87,17 +75,7 @@ impl Context {
                 reason: "exige buffer dynamic que não seja staging".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::map_write_discard(self, buffer)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = buffer;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::map_write_discard(self, buffer)
     }
 
     /// Mapeia `buffer` (que precisa ter sido criado com
@@ -115,17 +93,7 @@ impl Context {
                 reason: "leitura pela CPU exige BufferUsage::Staging".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::map_read(self, buffer)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = buffer;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::map_read(self, buffer)
     }
 }
 
@@ -134,7 +102,6 @@ impl Context {
 pub struct ReadMappedBuffer<'a> {
     pub(crate) context: &'a Context,
     pub(crate) buffer: &'a Buffer,
-    #[cfg(target_os = "windows")]
     pub(crate) ptr: *const u8,
     pub(crate) size: usize,
 }
@@ -142,27 +109,13 @@ pub struct ReadMappedBuffer<'a> {
 impl ReadMappedBuffer<'_> {
     /// Os bytes do buffer mapeado.
     pub fn as_slice(&self) -> &[u8] {
-        #[cfg(target_os = "windows")]
-        unsafe {
-            std::slice::from_raw_parts(self.ptr, self.size)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            &[]
-        }
+        unsafe { std::slice::from_raw_parts(self.ptr, self.size) }
     }
 }
 
 impl Drop for ReadMappedBuffer<'_> {
     fn drop(&mut self) {
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::unmap_buffer(self.context, self.buffer);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (self.context, self.buffer);
-        }
+        ActiveBackend::unmap_buffer(self.context, self.buffer);
     }
 }
 

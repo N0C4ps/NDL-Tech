@@ -15,6 +15,7 @@
 //! genéricos (ver [`crate::buffer::Buffer::set_label`] para o equivalente
 //! já real, específico de buffer/textura) continuam reservados.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::context::Context;
 
 impl Context {
@@ -22,35 +23,18 @@ impl Context {
     /// mostram os comandos entre este `push` e o `pop_debug_group`
     /// correspondente agrupados sob `label`. Grupos podem ser aninhados.
     pub fn push_debug_group(&self, label: &str) {
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::push_debug_group(self, label);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = label;
-        }
+        ActiveBackend::push_debug_group(self, label);
     }
 
     /// Fecha o grupo de depuração mais recente aberto por
     /// [`Context::push_debug_group`].
     pub fn pop_debug_group(&self) {
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::pop_debug_group(self);
-        }
+        ActiveBackend::pop_debug_group(self);
     }
 
     /// Insere um marcador pontual (sem duração) na timeline de comandos,
     /// visível em ferramentas de debug gráfico.
     pub fn insert_debug_marker(&self, label: &str) {
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::insert_debug_marker(self, label);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = label;
-        }
+        ActiveBackend::insert_debug_marker(self, label);
     }
 }

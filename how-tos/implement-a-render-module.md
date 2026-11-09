@@ -17,9 +17,12 @@ histórico de commits do crate para exemplos reais, um módulo por commit):
 
 2. Implemente a contraparte no backend concreto, em
    `crates/ndl-render/src/backend/directx/mod.rs` (hoje o único backend real) — nunca no módulo
-   público diretamente. Siga [`../docs/backend-abstraction.md`](../docs/backend-abstraction.md):
-   o módulo público chama o backend através do contrato interno, nunca referencia tipos `windows`/
-   D3D11 fora de `backend::directx`.
+   público diretamente. Siga [`../docs/backend-abstraction.md`](../docs/backend-abstraction.md): se
+   a operação for nova, adicione o método (e, se precisar de um recurso nativo novo, o tipo
+   associado `type RawX`) em `crate::backend::Backend` (`src/backend/mod.rs`), implemente-o em
+   `impl Backend for DirectX11`, e no módulo público chame só `ActiveBackend::operation(...)` —
+   nunca referencia tipos `windows::`/D3D11 fora de `backend::directx`, nem `#[cfg(target_os =
+   "windows")]` fora de `backend::mod.rs`.
 
 3. Siga as convenções de [`../docs/code-style.md`](../docs/code-style.md) para os novos tipos
    públicos: descriptor com `Default` + `..Default::default()`, derives mínimos

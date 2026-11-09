@@ -70,7 +70,6 @@ use crate::view::{DepthStencilView, RenderTargetView, ShaderResourceView, Unorde
 /// `//!` deste módulo. Puramente associativo (sem `&self`): a própria
 /// crate escolhe `ActiveBackend` em tempo de compilação, então um backend
 /// é só um marcador de tipo (`enum DirectX11 {}`, sem instância).
-#[allow(dead_code)] // o resto do crate ainda está sendo migrado pra usar isto
 pub(crate) trait Backend: Sized {
     // --- tipos nativos guardados dentro dos tipos públicos ---
     //

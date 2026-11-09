@@ -52,8 +52,21 @@ adapter, surface/swapchain, buffers, shaders HLSL (vertex/pixel/compute),
 texturas/sampler, pipelines gráficos com estado fixo explícito, depth/blend, gravação diferida e fila lógica,
 cópias, queries, sincronização e debug. Isso descreve o subconjunto já
 implementado, não uma API completa: cada módulo documenta seus recursos
-disponíveis e pendências, e partes como múltiplos backends, shaders
-geometry/hull/domain e operações de inspeção continuam reservadas.
+disponíveis e pendências, e partes como shaders geometry/hull/domain e
+operações de inspeção continuam reservadas.
+
+Toda a crate (fora do backend em si) é 100% agnóstica de API gráfica: um
+único `trait Backend` com tipos associados por recurso nativo
+(`RawBuffer`, `RawContext`, `RawTexture2D`, ...) e um método por operação
+é o único ponto de contato entre os módulos públicos e o backend
+concreto — nenhum módulo público importa um tipo `windows::`/D3D11 ou
+referencia `backend::directx` por nome. O backend ativo é escolhido em
+tempo de compilação por feature do Cargo (`backend-directx11`, hoje a
+única e a padrão), resolvido num `ActiveBackend` monomorphizado — sem
+`dyn`/vtable em nenhuma chamada. Isso é o que torna adicionar D3D12/Vulkan
+depois um trabalho isolado em `backend/<nome>/` implementando esse
+contrato, sem tocar em `buffer`, `context`, `pipeline` ou qualquer outro
+módulo público.
 
 Desenho instanciado (`Context::draw_instanced`/`draw_indexed_instanced`,
 com atributos de vertex buffer por instância via

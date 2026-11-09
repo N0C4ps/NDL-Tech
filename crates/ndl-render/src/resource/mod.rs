@@ -12,33 +12,20 @@
 //! D3D11). `resource()`, `descriptor()` e um trait comum unificando os
 //! tipos de recurso continuam reservados.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::buffer::Buffer;
 use crate::texture::Texture2D;
 
 impl Buffer {
     /// Dá um nome a este buffer, visível em ferramentas de debug gráfico.
     pub fn set_label(&self, label: &str) {
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::set_resource_label(&self.raw, label);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = label;
-        }
+        ActiveBackend::set_buffer_label(self, label);
     }
 }
 
 impl Texture2D {
     /// Dá um nome a esta textura, visível em ferramentas de debug gráfico.
     pub fn set_label(&self, label: &str) {
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::set_resource_label(&self.raw, label);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = label;
-        }
+        ActiveBackend::set_texture_label(self, label);
     }
 }
