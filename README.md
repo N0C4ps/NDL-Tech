@@ -47,17 +47,20 @@ funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
 árvore de módulos como stubs reservados para a integração real com cada SO.
 
 `ndl-render` ainda tem módulos reservados (`command`, `queue`, `resource`,
-`memory`, `texture`, `blend`, `depth_stencil`, `sampler`, `compute`,
-`transfer`, `query`, `sync`, `debug`), documentados com os tipos e métodos
-planejados, mas sem implementação.
+`memory`, `blend`, `depth_stencil`, `compute`, `transfer`, `query`, `sync`,
+`debug`), documentados com os tipos e métodos planejados, mas sem
+implementação.
 
 `ndl-render::core`, `format`, `surface`, `context`, `view`, `buffer`,
-`shader`, `input`, `pipeline`, `render` (via `Context::draw`) e `raster`
-(`Viewport`) já são **reais**: dá para compilar HLSL em runtime
-(`shader::compile_hlsl`), criar vertex/pixel shader, input layout, vertex
-buffer e um `GraphicsPipeline`, e desenhar geometria de verdade numa
-janela real — testado desenhando um triângulo colorido
-(`tests/triangle.rs`) numa janela Win32 crua, sem tocar em `ndl-platform`.
+`shader`, `input`, `pipeline`, `texture`, `sampler` e `raster` (`Viewport`)
+já são **reais**: dá para compilar HLSL em runtime (`shader::compile_hlsl`),
+criar vertex/pixel shader, input layout, vertex/constant buffer, texturas
+com upload de dados, samplers e um `GraphicsPipeline`, e desenhar geometria
+texturizada de verdade numa janela real. Testado com um triângulo colorido
+(`tests/triangle.rs`) e um quad texturizado que pulsa de tamanho via uma
+matriz de `ndl-math` enviada por um constant buffer (`tests/textured_quad.rs`)
+— `ndl-render` nunca depende de `ndl-math`; é o jogo (no teste) que monta os
+bytes da matriz e entrega para `Context::update_buffer`.
 
 `Device::new()` cria um dispositivo Direct3D 11 de verdade (via
 `backend::directx`, `windows-rs`), com `DeviceCapabilities`/`DeviceLimits`

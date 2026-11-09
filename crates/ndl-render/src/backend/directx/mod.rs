@@ -14,12 +14,15 @@ use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout,
-    ID3D11PixelShader, ID3D11RenderTargetView, ID3D11Texture2D, ID3D11VertexShader,
-    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_FLAG, D3D11_BIND_INDEX_BUFFER, D3D11_BIND_VERTEX_BUFFER,
+    ID3D11PixelShader, ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView,
+    ID3D11Texture2D, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_FLAG,
+    D3D11_BIND_INDEX_BUFFER, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_VERTEX_BUFFER,
     D3D11_BUFFER_DESC, D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-    D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_FLAG, D3D11_INPUT_ELEMENT_DESC,
-    D3D11_INPUT_PER_VERTEX_DATA, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT,
-    D3D11_USAGE_DYNAMIC,
+    D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_FLAG, D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+    D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA,
+    D3D11_SAMPLER_DESC, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
+    D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_MIRROR, D3D11_TEXTURE_ADDRESS_WRAP,
+    D3D11_USAGE_DEFAULT, D3D11_USAGE_DYNAMIC,
 };
 use windows::core::PCSTR;
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -346,6 +349,123 @@ pub(crate) fn create_input_layout(
     })?;
 
     Ok(crate::input::InputLayout { raw: layout })
+}
+
+pub(crate) fn create_texture_2d(
+    device: &Device,
+    desc: &crate::texture::TextureDescriptor,
+    data: &[u8],
+) -> Result<crate::texture::Texture2D, GraphicsError> {
+    let format = desc
+        .format
+        .to_dxgi_format()
+        .ok_or(GraphicsError::Unsupported("formato não suportado para textura"))?;
+
+    let texture_desc = D3D11_TEXTURE2D_DESC {
+        Width: desc.width,
+        Height: desc.height,
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: format,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: D3D11_USAGE_DEFAULT,
+        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+        CPUAccessFlags: 0,
+        MiscFlags: 0,
+    };
+
+    let bytes_per_pixel = desc.format.bits_per_pixel() / 8;
+    let initial_data = D3D11_SUBRESOURCE_DATA {
+        pSysMem: data.as_ptr() as *const _,
+        SysMemPitch: desc.width * bytes_per_pixel,
+        SysMemSlicePitch: 0,
+    };
+
+    let mut texture: Option<ID3D11Texture2D> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateTexture2D(&texture_desc, Some(&initial_data), Some(&mut texture))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let texture = texture
+        .ok_or_else(|| GraphicsError::Backend("CreateTexture2D não retornou uma textura".into()))?;
+
+    Ok(crate::texture::Texture2D::from_raw(
+        texture,
+        desc.width,
+        desc.height,
+        desc.format,
+    ))
+}
+
+pub(crate) fn create_shader_resource_view(
+    device: &Device,
+    texture: &crate::texture::Texture2D,
+) -> Result<crate::view::ShaderResourceView, GraphicsError> {
+    let mut view: Option<ID3D11ShaderResourceView> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateShaderResourceView(&texture.raw, None, Some(&mut view))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let view = view.ok_or_else(|| {
+        GraphicsError::Backend("CreateShaderResourceView não retornou uma view".into())
+    })?;
+
+    Ok(crate::view::ShaderResourceView::from_raw(view))
+}
+
+pub(crate) fn create_sampler(
+    device: &Device,
+    desc: &crate::sampler::SamplerDescriptor,
+) -> Result<crate::sampler::Sampler, GraphicsError> {
+    use crate::sampler::{AddressMode, FilterMode};
+
+    let filter = match desc.filter {
+        FilterMode::Point => D3D11_FILTER_MIN_MAG_MIP_POINT,
+        FilterMode::Linear => D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+    };
+    let address = match desc.address_mode {
+        AddressMode::Wrap => D3D11_TEXTURE_ADDRESS_WRAP,
+        AddressMode::Mirror => D3D11_TEXTURE_ADDRESS_MIRROR,
+        AddressMode::Clamp => D3D11_TEXTURE_ADDRESS_CLAMP,
+    };
+
+    let sampler_desc = D3D11_SAMPLER_DESC {
+        Filter: filter,
+        AddressU: address,
+        AddressV: address,
+        AddressW: address,
+        MipLODBias: 0.0,
+        MaxAnisotropy: 1,
+        ComparisonFunc: windows::Win32::Graphics::Direct3D11::D3D11_COMPARISON_NEVER,
+        BorderColor: [0.0; 4],
+        MinLOD: 0.0,
+        MaxLOD: f32::MAX,
+    };
+
+    let mut sampler: Option<ID3D11SamplerState> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateSamplerState(&sampler_desc, Some(&mut sampler))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let sampler = sampler
+        .ok_or_else(|| GraphicsError::Backend("CreateSamplerState não retornou um sampler".into()))?;
+
+    Ok(crate::sampler::Sampler { raw: sampler })
 }
 
 pub(crate) fn surface_from_handle(

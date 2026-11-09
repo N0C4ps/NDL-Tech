@@ -28,3 +28,10 @@ windows = { version = "0.58", features = [
     "Win32_System_LibraryLoader",
     "Win32_Graphics_Gdi",
 ] }
+
+[dev-dependencies]
+# Só para os testes de integração montarem uma matriz de transform de
+# verdade — ndl-render em si nunca depende de ndl-math (ou de qualquer
+# outra crate do NDL): update_buffer recebe bytes crus, é o jogo (aqui, o
+# teste) que decide o que esses bytes significam.
+ndl-math = { path = "../ndl-math" }

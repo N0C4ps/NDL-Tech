@@ -1,24 +1,83 @@
 //! Amostragem de texturas.
 //!
-//! ## Planejado
+//! ## Estado atual
 //!
-//! Métodos: `create_sampler()`, `set_sampler()`, `set_samplers()`,
-//! `get_sampler()`.
-//!
-//! | Categoria | Opções |
-//! |---|---|
-//! | FilterMode | Point, Linear |
-//! | MipFilterMode | Point, Linear, None |
-//! | AddressMode | Wrap, Mirror, Clamp, Border, MirrorOnce |
-//! | Comparison | os oito valores de `CompareOp` |
-//! | ReductionMode | Standard, Comparison, Minimum, Maximum (conforme suporte) |
-//! | Anisotropia | limitada pelo dispositivo |
-//! | LOD | `min_lod`, `max_lod`, `mip_lod_bias` |
-//! | Border | `border_color` |
-//!
-//! Presets planejados: `Sampler::point_clamp()`, `point_repeat()`,
-//! `linear_clamp()`, `linear_repeat()`, `trilinear()`, `anisotropic()`,
-//! `shadow_comparison()`. Também útil: `create_sampler_from_descriptor()`
-//! para configurações personalizadas.
-//!
-//! Ainda não implementado.
+//! [`Sampler`] já é real, com [`FilterMode`] e [`AddressMode`] cobrindo o
+//! essencial (ponto/linear, wrap/clamp/mirror). Comparação (`CompareOp`),
+//! anisotropia, bias de LOD e cor de borda continuam reservados.
+
+use crate::core::{Device, GraphicsError};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FilterMode {
+    Point,
+    #[default]
+    Linear,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AddressMode {
+    #[default]
+    Wrap,
+    Mirror,
+    Clamp,
+}
+
+/// Configuração usada para criar um [`Sampler`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SamplerDescriptor {
+    pub filter: FilterMode,
+    pub address_mode: AddressMode,
+}
+
+impl SamplerDescriptor {
+    pub const fn point_clamp() -> Self {
+        Self {
+            filter: FilterMode::Point,
+            address_mode: AddressMode::Clamp,
+        }
+    }
+
+    pub const fn point_repeat() -> Self {
+        Self {
+            filter: FilterMode::Point,
+            address_mode: AddressMode::Wrap,
+        }
+    }
+
+    pub const fn linear_clamp() -> Self {
+        Self {
+            filter: FilterMode::Linear,
+            address_mode: AddressMode::Clamp,
+        }
+    }
+
+    pub const fn linear_repeat() -> Self {
+        Self {
+            filter: FilterMode::Linear,
+            address_mode: AddressMode::Wrap,
+        }
+    }
+}
+
+/// Um sampler de textura já criado no dispositivo.
+pub struct Sampler {
+    #[cfg(target_os = "windows")]
+    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11SamplerState,
+}
+
+impl Device {
+    pub fn create_sampler(&self, desc: &SamplerDescriptor) -> Result<Sampler, GraphicsError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::backend::directx::create_sampler(self, desc);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = desc;
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+}

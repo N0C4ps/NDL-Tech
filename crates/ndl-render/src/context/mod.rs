@@ -7,20 +7,19 @@
 //!
 //! ## Estado atual
 //!
-//! [`Context`] já é real para o contexto imediato: `set_render_target`,
-//! `clear_render_target` e `flush` funcionam de verdade contra o D3D11.
-//! O resto do que estava planejado (pipeline, vertex input, shader,
-//! recursos, rasterizer, stream output, consultas, inspeção, e contextos
-//! diferidos) continua reservado — ver tabela abaixo.
+//! [`Context`] já cobre o essencial pra desenhar com texturas e constant
+//! buffers: `set_render_target`, `clear_render_target`, `flush`,
+//! `set_viewport`, `set_pipeline`, `set_vertex_buffer`,
+//! `set_constant_buffer`, `set_shader_resource`, `set_sampler`,
+//! `update_buffer` e `draw`. O resto do que estava planejado (geometry/
+//! hull/domain shader, output merger com múltiplos alvos, stream output,
+//! consultas, inspeção, e contextos diferidos) continua reservado — ver
+//! tabela abaixo.
 //!
 //! | Grupo | Métodos planejados |
 //! |---|---|
-//! | Pipeline | `set_pipeline`, `set_compute_pipeline`, `unbind_pipeline` |
-//! | Vertex input | `set_vertex_buffer(s)`, `set_index_buffer`, `set_input_layout`, `set_primitive_topology` |
-//! | Shader | `set_vertex_shader`, `set_pixel_shader`, `set_geometry_shader`, `set_hull_shader`, `set_domain_shader`, `set_compute_shader` |
-//! | Recursos | `set_constant_buffer`, `set_shader_resource`, `set_sampler`, `set_unordered_access_view` |
-//! | Output merger | `set_render_targets` (múltiplos), `set_depth_stencil_target`, `set_blend_state`, `set_depth_stencil_state` |
-//! | Rasterizer | `set_rasterizer_state`, `set_viewport(s)`, `set_scissor(s)` |
+//! | Shader | `set_geometry_shader`, `set_hull_shader`, `set_domain_shader`, `set_compute_shader` |
+//! | Output merger | múltiplos alvos simultâneos, `set_depth_stencil_target`, `set_blend_state`, `set_depth_stencil_state` |
 //! | Stream output | `set_stream_output_targets`, `reset_stream_output_targets` |
 //! | Consultas | `begin_query`, `end_query`, `get_query_data`, `set_predication` |
 //! | Inspeção | `get_pipeline_state`, `get_bound_resources`, `get_render_targets`, `get_viewports` |
@@ -31,7 +30,8 @@ use windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext;
 use crate::buffer::Buffer;
 use crate::pipeline::GraphicsPipeline;
 use crate::raster::Viewport;
-use crate::view::RenderTargetView;
+use crate::sampler::Sampler;
+use crate::view::{RenderTargetView, ShaderResourceView};
 
 /// O contexto imediato de um [`crate::core::Device`] — por onde comandos
 /// de limpeza/desenho são de fato submetidos à GPU.
@@ -148,6 +148,66 @@ impl Context {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (vertex_count, first_vertex);
+        }
+    }
+
+    /// Vincula `buffer` ao slot `slot` de constant buffer, visível tanto
+    /// para o vertex quanto para o pixel shader.
+    pub fn set_constant_buffer(&self, slot: u32, buffer: &Buffer) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            let slice = Some(&[Some(buffer.raw.clone())][..]);
+            self.raw.VSSetConstantBuffers(slot, slice);
+            self.raw.PSSetConstantBuffers(slot, slice);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (slot, buffer);
+        }
+    }
+
+    /// Vincula `view` ao slot `slot` de recurso de leitura do pixel shader.
+    pub fn set_shader_resource(&self, slot: u32, view: &ShaderResourceView) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.PSSetShaderResources(slot, Some(&[Some(view.raw.clone())]));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (slot, view);
+        }
+    }
+
+    /// Vincula `sampler` ao slot `slot` de sampler do pixel shader.
+    pub fn set_sampler(&self, slot: u32, sampler: &Sampler) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.PSSetSamplers(slot, Some(&[Some(sampler.raw.clone())]));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (slot, sampler);
+        }
+    }
+
+    /// Sobrescreve todo o conteúdo de `buffer` com `data` (que deve ter
+    /// exatamente `buffer.size()` bytes) — o jeito de atualizar, por
+    /// exemplo, um constant buffer de transform a cada quadro.
+    pub fn update_buffer(&self, buffer: &Buffer, data: &[u8]) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            self.raw.UpdateSubresource(
+                &buffer.raw,
+                0,
+                None,
+                data.as_ptr() as *const _,
+                0,
+                0,
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (buffer, data);
         }
     }
 }

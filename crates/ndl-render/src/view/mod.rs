@@ -6,11 +6,9 @@
 //!
 //! ## Estado atual
 //!
-//! [`RenderTargetView`] (RTV) já é real — é o que permite limpar/desenhar
-//! no back buffer de uma [`crate::surface::Swapchain`]. `ShaderResourceView`,
-//! `DepthStencilView` e `UnorderedAccessView` ainda não existem; entram
-//! quando `texture`/`depth_stencil`/`compute` forem implementados de
-//! verdade.
+//! [`RenderTargetView`] (RTV) e [`ShaderResourceView`] (SRV) já são
+//! reais. `DepthStencilView` e `UnorderedAccessView` ainda não existem;
+//! entram quando `depth_stencil`/`compute` forem implementados de verdade.
 //!
 //! Métodos de conveniência planejados para todas as views: `resource()`,
 //! `descriptor()`, `format()`, `dimension()`, `mip_range()`,
@@ -29,6 +27,22 @@ pub struct RenderTargetView {
 impl RenderTargetView {
     #[cfg(target_os = "windows")]
     pub(crate) fn from_raw(raw: windows::Win32::Graphics::Direct3D11::ID3D11RenderTargetView) -> Self {
+        Self { raw }
+    }
+}
+
+/// Uma visualização de leitura por shader — o que permite amostrar uma
+/// textura (ex: `Texture2D`/`Sampler` num pixel shader).
+pub struct ShaderResourceView {
+    #[cfg(target_os = "windows")]
+    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11ShaderResourceView,
+}
+
+impl ShaderResourceView {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn from_raw(
+        raw: windows::Win32::Graphics::Direct3D11::ID3D11ShaderResourceView,
+    ) -> Self {
         Self { raw }
     }
 }
