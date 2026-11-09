@@ -46,20 +46,24 @@ cursor, monitores), com os backends `headless` e `windows` (via `winit`)
 funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
 árvore de módulos como stubs reservados para a integração real com cada SO.
 
-`ndl-render` ainda tem módulos reservados (`resource`, `memory`,
-`compute`, `transfer`, `query`, `sync`, `debug`), documentados com os
-tipos e métodos planejados, mas sem implementação.
+`ndl-render` ainda tem módulos reservados (`compute`, `transfer`, `query`,
+`sync`, `debug`), documentados com os tipos e métodos planejados, mas sem
+implementação.
 
 `ndl-render::core`, `format`, `surface`, `context`, `view`, `buffer`,
 `shader`, `input` (incluindo draw indexado), `pipeline`, `texture`,
-`sampler`, `raster` (`Viewport`), `depth_stencil`, `blend`, `command` e
-`queue` já são **reais**: dá para compilar HLSL em runtime
-(`shader::compile_hlsl`), criar vertex/pixel shader, input layout,
-vertex/index/constant buffer, texturas com upload de dados, samplers,
-depth buffer com teste de profundidade, blending com transparência, um
-`GraphicsPipeline`, gravar comandos num contexto diferido
-(`CommandEncoder`) e submetê-los numa `GraphicsQueue`, e desenhar
-geometria texturizada de verdade numa janela real.
+`sampler`, `raster` (`Viewport`), `depth_stencil`, `blend`, `command`,
+`queue`, `memory` e `resource` já são **reais**: dá para compilar HLSL em
+runtime (`shader::compile_hlsl`), criar vertex/pixel shader, input
+layout, vertex/index/constant buffer, texturas com upload de dados,
+samplers, depth buffer com teste de profundidade, blending com
+transparência, um `GraphicsPipeline`, gravar comandos num contexto
+diferido (`CommandEncoder`) e submetê-los numa `GraphicsQueue`, mapear um
+buffer dinâmico com desmapeio automático (`Context::map_write_discard` +
+`MappedBuffer`), girar entre N constant buffers (`memory::ConstantBufferRing`)
+em vez de travar a GPU reescrevendo o mesmo todo quadro, nomear recursos
+para debug (`set_label`), e desenhar geometria texturizada de verdade
+numa janela real.
 
 `CommandEncoder` reaproveita a própria `Context` por baixo (via `Deref`) —
 no D3D11, um contexto diferido é a mesma interface do contexto imediato,

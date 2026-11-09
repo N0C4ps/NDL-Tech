@@ -1,8 +1,44 @@
 //! Recursos e suas descrições.
 //!
-//! Conceitos e traits compartilhados por todos os tipos de recurso de GPU
-//! (`buffer`, `texture`, `view`, ...) — descriptors, labels, ciclo de vida.
-//! Os tipos concretos vivem em seus próprios módulos; este módulo reúne o
-//! que é comum entre eles.
+//! Conceitos compartilhados por todos os tipos de recurso de GPU
+//! (`buffer`, `texture`, ...). Os tipos concretos vivem em seus próprios
+//! módulos; este módulo reúne o que é comum entre eles.
 //!
-//! Ainda não implementado.
+//! ## Estado atual
+//!
+//! `set_label` já é real em [`crate::buffer::Buffer`] e
+//! [`crate::texture::Texture2D`] — dá um nome ao recurso nativo, visível
+//! em ferramentas de debug gráfico (RenderDoc, PIX, a debug layer do
+//! D3D11). `resource()`, `descriptor()` e um trait comum unificando os
+//! tipos de recurso continuam reservados.
+
+use crate::buffer::Buffer;
+use crate::texture::Texture2D;
+
+impl Buffer {
+    /// Dá um nome a este buffer, visível em ferramentas de debug gráfico.
+    pub fn set_label(&self, label: &str) {
+        #[cfg(target_os = "windows")]
+        {
+            crate::backend::directx::set_resource_label(&self.raw, label);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = label;
+        }
+    }
+}
+
+impl Texture2D {
+    /// Dá um nome a esta textura, visível em ferramentas de debug gráfico.
+    pub fn set_label(&self, label: &str) {
+        #[cfg(target_os = "windows")]
+        {
+            crate::backend::directx::set_resource_label(&self.raw, label);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = label;
+        }
+    }
+}

@@ -24,10 +24,11 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_DEBUG,
     D3D11_CREATE_DEVICE_FLAG, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_WRITE_MASK_ALL,
     D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT,
-    D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
-    D3D11_SAMPLER_DESC, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
-    D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_MIRROR, D3D11_TEXTURE_ADDRESS_WRAP,
-    D3D11_USAGE_DEFAULT, D3D11_USAGE_DYNAMIC,
+    D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_MAP_WRITE_DISCARD, D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_SAMPLER_DESC,
+    D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_TEXTURE_ADDRESS_CLAMP,
+    D3D11_TEXTURE_ADDRESS_MIRROR, D3D11_TEXTURE_ADDRESS_WRAP, D3D11_USAGE_DEFAULT,
+    D3D11_USAGE_DYNAMIC,
 };
 use windows::core::PCSTR;
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -354,6 +355,56 @@ pub(crate) fn create_input_layout(
     })?;
 
     Ok(crate::input::InputLayout { raw: layout })
+}
+
+/// Dá um nome a qualquer recurso D3D11 (`ID3D11DeviceChild`) — visível em
+/// ferramentas de debug gráfico. Resources que não suportam
+/// `SetPrivateData` (não deveria acontecer para buffers/texturas) só
+/// ignoram silenciosamente, já que um nome de debug nunca deveria
+/// interromper o programa.
+pub(crate) fn set_resource_label<T: windows::core::Interface>(resource: &T, label: &str) {
+    use windows::Win32::Graphics::Direct3D::WKPDID_D3DDebugObjectName;
+    use windows::Win32::Graphics::Direct3D11::ID3D11DeviceChild;
+
+    let Ok(child) = resource.cast::<ID3D11DeviceChild>() else {
+        return;
+    };
+    let Ok(name) = std::ffi::CString::new(label) else {
+        return;
+    };
+    unsafe {
+        let _ = child.SetPrivateData(
+            &WKPDID_D3DDebugObjectName,
+            name.as_bytes().len() as u32,
+            Some(name.as_ptr() as *const _),
+        );
+    }
+}
+
+pub(crate) fn map_write_discard<'a>(
+    context: &'a crate::context::Context,
+    buffer: &'a crate::buffer::Buffer,
+) -> Result<crate::memory::MappedBuffer<'a>, GraphicsError> {
+    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+    unsafe {
+        context
+            .raw
+            .Map(&buffer.raw, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut mapped))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    Ok(crate::memory::MappedBuffer {
+        context,
+        buffer,
+        ptr: mapped.pData as *mut u8,
+        size: buffer.size() as usize,
+    })
+}
+
+pub(crate) fn unmap_buffer(context: &crate::context::Context, buffer: &crate::buffer::Buffer) {
+    unsafe {
+        context.raw.Unmap(&buffer.raw, 0);
+    }
 }
 
 pub(crate) fn create_command_encoder(
