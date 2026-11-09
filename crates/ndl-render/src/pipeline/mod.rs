@@ -14,6 +14,7 @@
 //! número de alvos de cor, na mesma ordem (MRT). MSAA ainda não faz parte
 //! do contrato. [`ComputePipeline`] também já é real.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::blend::BlendStateDescriptor;
 use crate::core::{Device, GraphicsError};
 use crate::depth_stencil::DepthStencilStateDescriptor;
@@ -33,19 +34,13 @@ pub struct GraphicsPipelineDescriptor<'a> {
 /// Um pipeline gráfico: todo o estado necessário para emitir um `draw()`
 /// — hoje, vertex/pixel shader, input layout e topologia.
 pub struct GraphicsPipeline {
-    #[cfg(target_os = "windows")]
-    pub(crate) vertex_shader: windows::Win32::Graphics::Direct3D11::ID3D11VertexShader,
-    #[cfg(target_os = "windows")]
-    pub(crate) pixel_shader: windows::Win32::Graphics::Direct3D11::ID3D11PixelShader,
-    #[cfg(target_os = "windows")]
-    pub(crate) input_layout: windows::Win32::Graphics::Direct3D11::ID3D11InputLayout,
+    pub(crate) vertex_shader: <ActiveBackend as Backend>::RawVertexShader,
+    pub(crate) pixel_shader: <ActiveBackend as Backend>::RawPixelShader,
+    pub(crate) input_layout: <ActiveBackend as Backend>::RawInputLayout,
     pub(crate) primitive_topology: PrimitiveTopology,
-    #[cfg(target_os = "windows")]
-    pub(crate) rasterizer_state: windows::Win32::Graphics::Direct3D11::ID3D11RasterizerState,
-    #[cfg(target_os = "windows")]
-    pub(crate) blend_state: windows::Win32::Graphics::Direct3D11::ID3D11BlendState,
-    #[cfg(target_os = "windows")]
-    pub(crate) depth_stencil_state: windows::Win32::Graphics::Direct3D11::ID3D11DepthStencilState,
+    pub(crate) rasterizer_state: <ActiveBackend as Backend>::RawRasterizerState,
+    pub(crate) blend_state: <ActiveBackend as Backend>::RawBlendState,
+    pub(crate) depth_stencil_state: <ActiveBackend as Backend>::RawDepthStencilState,
     pub(crate) stencil_reference: u32,
     /// Vazio = nenhum formato declarado (caminho de
     /// [`Device::create_graphics_pipeline`], sem checagem de attachment).
@@ -75,32 +70,22 @@ impl Device {
         &self,
         desc: &GraphicsPipelineDescriptor<'_>,
     ) -> Result<GraphicsPipeline, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            let rasterizer = self.create_rasterizer_state(&RasterizerStateDescriptor::default())?;
-            let blend = self.create_blend_state(&BlendStateDescriptor::default())?;
-            let depth_stencil =
-                self.create_depth_stencil_state(&DepthStencilStateDescriptor::disabled())?;
-            return Ok(GraphicsPipeline {
-                vertex_shader: desc.vertex_shader.raw.clone(),
-                pixel_shader: desc.pixel_shader.raw.clone(),
-                input_layout: desc.input_layout.raw.clone(),
-                primitive_topology: desc.primitive_topology,
-                rasterizer_state: rasterizer.raw,
-                blend_state: blend.raw,
-                depth_stencil_state: depth_stencil.raw,
-                color_formats: Vec::new(),
-                depth_format: None,
-                stencil_reference: 0,
-            });
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = desc;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        let rasterizer = self.create_rasterizer_state(&RasterizerStateDescriptor::default())?;
+        let blend = self.create_blend_state(&BlendStateDescriptor::default())?;
+        let depth_stencil =
+            self.create_depth_stencil_state(&DepthStencilStateDescriptor::disabled())?;
+        Ok(GraphicsPipeline {
+            vertex_shader: desc.vertex_shader.raw.clone(),
+            pixel_shader: desc.pixel_shader.raw.clone(),
+            input_layout: desc.input_layout.raw.clone(),
+            primitive_topology: desc.primitive_topology,
+            rasterizer_state: rasterizer.raw,
+            blend_state: blend.raw,
+            depth_stencil_state: depth_stencil.raw,
+            color_formats: Vec::new(),
+            depth_format: None,
+            stencil_reference: 0,
+        })
     }
 
     /// Cria pipeline com estados fixos e formatos de attachment explícitos.
@@ -168,31 +153,21 @@ impl Device {
                 reason: "stencil test exige um formato de depth/stencil com canal stencil".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            let rasterizer = self.create_rasterizer_state(&state.rasterizer)?;
-            let blend = self.create_blend_state(&state.blend)?;
-            let depth_stencil = self.create_depth_stencil_state(&state.depth_stencil)?;
-            Ok(GraphicsPipeline {
-                vertex_shader: desc.vertex_shader.raw.clone(),
-                pixel_shader: desc.pixel_shader.raw.clone(),
-                input_layout: desc.input_layout.raw.clone(),
-                primitive_topology: desc.primitive_topology,
-                rasterizer_state: rasterizer.raw,
-                blend_state: blend.raw,
-                depth_stencil_state: depth_stencil.raw,
-                color_formats: state.color_formats.to_vec(),
-                depth_format: state.depth_format,
-                stencil_reference: state.stencil_reference as u32,
-            })
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (desc, state);
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        let rasterizer = self.create_rasterizer_state(&state.rasterizer)?;
+        let blend = self.create_blend_state(&state.blend)?;
+        let depth_stencil = self.create_depth_stencil_state(&state.depth_stencil)?;
+        Ok(GraphicsPipeline {
+            vertex_shader: desc.vertex_shader.raw.clone(),
+            pixel_shader: desc.pixel_shader.raw.clone(),
+            input_layout: desc.input_layout.raw.clone(),
+            primitive_topology: desc.primitive_topology,
+            rasterizer_state: rasterizer.raw,
+            blend_state: blend.raw,
+            depth_stencil_state: depth_stencil.raw,
+            color_formats: state.color_formats.to_vec(),
+            depth_format: state.depth_format,
+            stencil_reference: state.stencil_reference as u32,
+        })
     }
 
     pub fn create_compute_pipeline(
@@ -204,19 +179,9 @@ impl Device {
                 feature: "compute shaders não suportados pelo dispositivo".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            return Ok(ComputePipeline {
-                compute_shader: desc.compute_shader.raw.clone(),
-            });
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = desc;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        Ok(ComputePipeline {
+            compute_shader: desc.compute_shader.raw.clone(),
+        })
     }
 }
 
@@ -227,6 +192,5 @@ pub struct ComputePipelineDescriptor<'a> {
 
 /// Um pipeline de computação: hoje, só o compute shader em si.
 pub struct ComputePipeline {
-    #[cfg(target_os = "windows")]
-    pub(crate) compute_shader: windows::Win32::Graphics::Direct3D11::ID3D11ComputeShader,
+    pub(crate) compute_shader: <ActiveBackend as Backend>::RawComputeShader,
 }

@@ -6,6 +6,7 @@
 //! essencial (ponto/linear, wrap/clamp/mirror). Comparação (`CompareOp`),
 //! anisotropia, bias de LOD e cor de borda continuam reservados.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::core::{Device, GraphicsError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -62,22 +63,11 @@ impl SamplerDescriptor {
 
 /// Um sampler de textura já criado no dispositivo.
 pub struct Sampler {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11SamplerState,
+    pub(crate) raw: <ActiveBackend as Backend>::RawSampler,
 }
 
 impl Device {
     pub fn create_sampler(&self, desc: &SamplerDescriptor) -> Result<Sampler, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_sampler(self, desc);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = desc;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_sampler(self, desc)
     }
 }

@@ -12,6 +12,7 @@
 //! referência de stencil é dinâmica e atualmente usa zero ao vincular o
 //! pipeline; setters dinâmicos por draw ainda estão pendentes.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::core::{Device, GraphicsError};
 
 /// Função de comparação usada no teste de profundidade/stencil.
@@ -137,8 +138,7 @@ impl Default for DepthStencilStateDescriptor {
 
 /// Um estado de profundidade/stencil já criado no dispositivo.
 pub struct DepthStencilState {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11DepthStencilState,
+    pub(crate) raw: <ActiveBackend as Backend>::RawDepthStencilState,
 }
 
 impl Device {
@@ -146,17 +146,7 @@ impl Device {
         &self,
         desc: &DepthStencilStateDescriptor,
     ) -> Result<DepthStencilState, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_depth_stencil_state(self, desc);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = desc;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_depth_stencil_state(self, desc)
     }
 
     /// Cria uma textura de profundidade (sem dados iniciais — profundidade
@@ -195,16 +185,6 @@ impl Device {
                 feature: format!("depth/stencil no formato {format:?}"),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_depth_stencil_view(self, width, height, format);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (width, height, format);
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_depth_stencil_view(self, width, height, format)
     }
 }

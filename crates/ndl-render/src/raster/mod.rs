@@ -16,6 +16,7 @@
 //! | DepthClip e depth bias | implementados |
 //! | Scissor e multisampling | reservados |
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::core::{Device, GraphicsError};
 
 /// Modo de preenchimento dos triângulos.
@@ -71,8 +72,7 @@ impl Default for RasterizerStateDescriptor {
 
 /// Estado de rasterização criado no dispositivo.
 pub struct RasterizerState {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11RasterizerState,
+    pub(crate) raw: <ActiveBackend as Backend>::RawRasterizerState,
 }
 
 impl Device {
@@ -86,17 +86,7 @@ impl Device {
                 reason: "depth bias precisa conter valores finitos".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            crate::backend::directx::create_rasterizer_state(self, desc)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = desc;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_rasterizer_state(self, desc)
     }
 }
 

@@ -15,6 +15,7 @@
 //! [`crate::context::Context::draw_instanced`]). O resto das topologias e
 //! os builders de `VertexBufferLayout` continuam reservados.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::core::{Device, GraphicsError};
 use crate::format::Format;
 use crate::shader::VertexShader;
@@ -72,8 +73,7 @@ pub struct VertexAttribute {
 /// partir de uma lista de [`VertexAttribute`] e do bytecode do vertex
 /// shader que vai consumi-los (o D3D11 precisa casar os dois).
 pub struct InputLayout {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11InputLayout,
+    pub(crate) raw: <ActiveBackend as Backend>::RawInputLayout,
 }
 
 impl Device {
@@ -82,16 +82,6 @@ impl Device {
         attributes: &[VertexAttribute],
         vertex_shader: &VertexShader,
     ) -> Result<InputLayout, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_input_layout(self, attributes, vertex_shader);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (attributes, vertex_shader);
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_input_layout(self, attributes, vertex_shader)
     }
 }

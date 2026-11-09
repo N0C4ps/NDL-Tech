@@ -16,6 +16,7 @@
 //! | Domain | `DomainShader` | Avaliação da tesselação | reservado |
 //! | Geometry | `GeometryShader` | Processamento de primitivas | reservado |
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::core::{Device, GraphicsError};
 
 /// Compila código-fonte HLSL para bytecode de shader.
@@ -26,23 +27,12 @@ pub fn compile_hlsl(
     entry_point: &str,
     target: &str,
 ) -> Result<Vec<u8>, GraphicsError> {
-    #[cfg(target_os = "windows")]
-    {
-        crate::backend::directx::compile_hlsl(source, entry_point, target)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (source, entry_point, target);
-        Err(GraphicsError::Unsupported(
-            "nenhum backend gráfico implementado para este SO ainda",
-        ))
-    }
+    ActiveBackend::compile_hlsl(source, entry_point, target)
 }
 
 /// Um vertex shader já criado no dispositivo.
 pub struct VertexShader {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11VertexShader,
+    pub(crate) raw: <ActiveBackend as Backend>::RawVertexShader,
     /// Guardado porque `CreateInputLayout` precisa do bytecode do vertex
     /// shader, não só do shader já criado.
     pub(crate) bytecode: Vec<u8>,
@@ -50,56 +40,24 @@ pub struct VertexShader {
 
 /// Um pixel shader já criado no dispositivo.
 pub struct PixelShader {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11PixelShader,
+    pub(crate) raw: <ActiveBackend as Backend>::RawPixelShader,
 }
 
 /// Um compute shader já criado no dispositivo.
 pub struct ComputeShader {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11ComputeShader,
+    pub(crate) raw: <ActiveBackend as Backend>::RawComputeShader,
 }
 
 impl Device {
     pub fn create_vertex_shader(&self, bytecode: &[u8]) -> Result<VertexShader, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_vertex_shader(self, bytecode);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = bytecode;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_vertex_shader(self, bytecode)
     }
 
     pub fn create_pixel_shader(&self, bytecode: &[u8]) -> Result<PixelShader, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_pixel_shader(self, bytecode);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = bytecode;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_pixel_shader(self, bytecode)
     }
 
     pub fn create_compute_shader(&self, bytecode: &[u8]) -> Result<ComputeShader, GraphicsError> {
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_compute_shader(self, bytecode);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = bytecode;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_compute_shader(self, bytecode)
     }
 }

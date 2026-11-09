@@ -12,6 +12,7 @@
 //! máscara de escrita de canais. Operações lógicas (`LogicOp`) e blending
 //! independente por render target continuam reservados.
 
+use crate::backend::{ActiveBackend, Backend};
 use crate::core::{Device, GraphicsError};
 
 /// Fator multiplicado pela cor de origem/destino na equação de blend.
@@ -146,8 +147,7 @@ impl Default for BlendStateDescriptor {
 
 /// Um estado de blending já criado no dispositivo.
 pub struct BlendState {
-    #[cfg(target_os = "windows")]
-    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11BlendState,
+    pub(crate) raw: <ActiveBackend as Backend>::RawBlendState,
 }
 
 impl Device {
@@ -161,17 +161,7 @@ impl Device {
                 reason: "a máscara só aceita os bits RED, GREEN, BLUE e ALPHA".into(),
             });
         }
-        #[cfg(target_os = "windows")]
-        {
-            return crate::backend::directx::create_blend_state(self, desc);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = desc;
-            Err(GraphicsError::Unsupported(
-                "nenhum backend gráfico implementado para este SO ainda",
-            ))
-        }
+        ActiveBackend::create_blend_state(self, desc)
     }
 }
 
