@@ -1,7 +1,7 @@
 use super::{ApplicationState, PlatformCapabilities};
 use crate::backend::{self, BackendHandle};
 use crate::error::PlatformError;
-use crate::event::WindowEvent;
+use crate::event::Event;
 use crate::window::WindowDescriptor;
 
 /// Sistema operacional detectado (ou forçado) em que a plataforma está rodando.
@@ -104,6 +104,10 @@ impl Platform {
     /// da thread atual até que o jogo peça para encerrar (normalmente ao
     /// receber `WindowEvent::CloseRequested` em `on_event`).
     ///
+    /// `on_event` recebe tanto eventos de janela (`Event::Window`, ex:
+    /// teclado, mouse, resize) quanto eventos de ciclo de vida da aplicação
+    /// (`Event::App`, ex: `Suspended`/`Resumed`).
+    ///
     /// Esse é o caminho usado por um jogo de verdade — em contraste com
     /// [`Platform::create_window`] + [`crate::event::EventLoop`], que
     /// continuam existindo como caminho leve/testável (usado pelo backend
@@ -112,7 +116,7 @@ impl Platform {
     pub fn run_window(
         &self,
         descriptor: WindowDescriptor,
-        on_event: impl FnMut(WindowEvent) + 'static,
+        on_event: impl FnMut(Event<()>) + 'static,
     ) -> Result<(), PlatformError> {
         self.backend.run(descriptor, Box::new(on_event))
     }

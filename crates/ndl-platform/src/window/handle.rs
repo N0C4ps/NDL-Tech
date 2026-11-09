@@ -3,7 +3,7 @@
 pub struct WindowId(pub(crate) u64);
 
 impl WindowId {
-    pub(crate) fn new(id: u64) -> Self {
+    pub(crate) const fn new(id: u64) -> Self {
         Self(id)
     }
 

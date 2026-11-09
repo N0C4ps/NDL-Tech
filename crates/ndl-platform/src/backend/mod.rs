@@ -20,7 +20,7 @@ mod windows;
 
 use crate::core::{PlatformBackendKind, PlatformCapabilities};
 use crate::error::PlatformError;
-use crate::event::WindowEvent;
+use crate::event::Event;
 use crate::monitor::MonitorInfo;
 use crate::window::{WindowDescriptor, WindowId};
 
@@ -40,12 +40,13 @@ pub(crate) trait Backend {
     /// thread atual, bombeando o loop de mensagens do SO até que o jogo
     /// decida encerrar (normalmente ao receber `WindowEvent::CloseRequested`).
     ///
-    /// Backends sem janela real (`headless`) retornam
-    /// [`PlatformError::Unsupported`].
+    /// `on_event` recebe tanto eventos de janela (`Event::Window`) quanto
+    /// de ciclo de vida da aplicação (`Event::App`). Backends sem janela
+    /// real (`headless`) retornam [`PlatformError::Unsupported`].
     fn run(
         &self,
         descriptor: WindowDescriptor,
-        on_event: Box<dyn FnMut(WindowEvent)>,
+        on_event: Box<dyn FnMut(Event<()>)>,
     ) -> Result<(), PlatformError>;
 }
 

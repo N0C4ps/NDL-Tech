@@ -6,7 +6,11 @@
 //! independente de qual biblioteca está por baixo.
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton as WinitMouseButton, WindowEvent as WinitWindowEvent};
+use winit::event::{
+    ElementState, Ime as WinitIme, Modifiers as WinitModifiers, MouseButton as WinitMouseButton,
+    MouseScrollDelta, Touch as WinitTouch, TouchPhase as WinitTouchPhase,
+    WindowEvent as WinitWindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode as WinitKeyCode, PhysicalKey};
 use winit::window::{Window as WinitWindow, WindowAttributes, WindowId as WinitWindowId};
@@ -14,10 +18,14 @@ use winit::window::{Window as WinitWindow, WindowAttributes, WindowId as WinitWi
 use crate::backend::Backend;
 use crate::core::PlatformCapabilities;
 use crate::error::PlatformError;
-use crate::event::WindowEvent;
+use crate::event::{AppEvent, Event, TouchPhase, WindowEvent};
 use crate::input::{KeyCode, KeyState, Modifiers, MouseButton, MouseState};
 use crate::monitor::MonitorInfo;
 use crate::window::{LogicalSize, WindowDescriptor, WindowId};
+
+/// Única janela suportada pelo backend nativo por enquanto
+/// (`PlatformCapabilities::multiple_windows == false`).
+const SINGLE_WINDOW_ID: WindowId = WindowId::new(1);
 
 pub(crate) struct WindowsBackend;
 
@@ -31,6 +39,9 @@ impl Backend for WindowsBackend {
     fn capabilities(&self) -> PlatformCapabilities {
         PlatformCapabilities {
             multiple_windows: false,
+            touch: true,
+            drag_and_drop: true,
+            ime: true,
             ..PlatformCapabilities::NONE
         }
     }
@@ -56,7 +67,7 @@ impl Backend for WindowsBackend {
     fn run(
         &self,
         descriptor: WindowDescriptor,
-        on_event: Box<dyn FnMut(WindowEvent)>,
+        on_event: Box<dyn FnMut(Event<()>)>,
     ) -> Result<(), PlatformError> {
         let event_loop =
             EventLoop::new().map_err(|err| PlatformError::Backend(err.to_string()))?;
@@ -66,6 +77,8 @@ impl Backend for WindowsBackend {
             on_event,
             window: None,
             winit_window_id: None,
+            modifiers: Modifiers::NONE,
+            started: false,
         };
 
         event_loop
@@ -76,9 +89,24 @@ impl Backend for WindowsBackend {
 
 struct App {
     descriptor: WindowDescriptor,
-    on_event: Box<dyn FnMut(WindowEvent)>,
+    on_event: Box<dyn FnMut(Event<()>)>,
     window: Option<WinitWindow>,
     winit_window_id: Option<WinitWindowId>,
+    /// Último estado conhecido dos modificadores (shift/ctrl/alt/super),
+    /// atualizado por `WindowEvent::ModifiersChanged` e aplicado aos
+    /// eventos de teclado/mouse subsequentes — `winit` não inclui os
+    /// modificadores em cada evento individual.
+    modifiers: Modifiers,
+    started: bool,
+}
+
+impl App {
+    fn emit(&mut self, event: WindowEvent) {
+        (self.on_event)(Event::Window {
+            window_id: SINGLE_WINDOW_ID,
+            event,
+        });
+    }
 }
 
 impl ApplicationHandler for App {
@@ -90,6 +118,9 @@ impl ApplicationHandler for App {
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
 
         if self.window.is_some() {
+            // Não é a primeira vez (ex: app voltou de segundo plano) —
+            // notifica como evento de ciclo de vida, não recria a janela.
+            (self.on_event)(Event::App(AppEvent::Resumed));
             return;
         }
 
@@ -109,12 +140,20 @@ impl ApplicationHandler for App {
             Ok(window) => {
                 self.winit_window_id = Some(window.id());
                 self.window = Some(window);
+                if !self.started {
+                    self.started = true;
+                    (self.on_event)(Event::App(AppEvent::Started));
+                }
             }
             Err(err) => {
                 eprintln!("ndl-platform: falha ao criar janela nativa: {err}");
                 event_loop.exit();
             }
         }
+    }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        (self.on_event)(Event::App(AppEvent::Suspended));
     }
 
     fn window_event(
@@ -127,10 +166,27 @@ impl ApplicationHandler for App {
             return;
         }
 
+        if let WinitWindowEvent::ModifiersChanged(modifiers) = &event {
+            self.modifiers = map_modifiers(modifiers);
+        }
+
+        // winit já entrega, junto da tecla, o texto que ela produz
+        // (considerando layout de teclado); repassamos isso como um
+        // `TextInput` separado, além do `KeyboardInput` em si.
+        if let WinitWindowEvent::KeyboardInput { event: key_event, .. } = &event {
+            if key_event.state == ElementState::Pressed {
+                if let Some(text) = &key_event.text {
+                    self.emit(WindowEvent::TextInput {
+                        text: text.to_string(),
+                    });
+                }
+            }
+        }
+
         let should_exit = matches!(event, WinitWindowEvent::CloseRequested);
 
-        if let Some(mapped) = map_window_event(&event) {
-            (self.on_event)(mapped);
+        if let Some(mapped) = self.map_window_event(event) {
+            self.emit(mapped);
         }
 
         if should_exit {
@@ -139,36 +195,69 @@ impl ApplicationHandler for App {
     }
 }
 
-fn map_window_event(event: &WinitWindowEvent) -> Option<WindowEvent> {
-    match event {
-        WinitWindowEvent::CloseRequested => Some(WindowEvent::CloseRequested),
-        WinitWindowEvent::Resized(size) => {
-            Some(WindowEvent::Resized(LogicalSize::new(size.width, size.height)))
+impl App {
+    fn map_window_event(&self, event: WinitWindowEvent) -> Option<WindowEvent> {
+        match event {
+            WinitWindowEvent::CloseRequested => Some(WindowEvent::CloseRequested),
+            WinitWindowEvent::Resized(size) => {
+                Some(WindowEvent::Resized(LogicalSize::new(size.width, size.height)))
+            }
+            WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                Some(WindowEvent::ScaleFactorChanged { scale_factor })
+            }
+            WinitWindowEvent::Focused(focused) => Some(WindowEvent::Focused(focused)),
+            WinitWindowEvent::RedrawRequested => Some(WindowEvent::RedrawRequested),
+
+            WinitWindowEvent::CursorMoved { position, .. } => Some(WindowEvent::CursorMoved {
+                position: (position.x, position.y),
+            }),
+            WinitWindowEvent::CursorEntered { .. } => Some(WindowEvent::CursorEntered),
+            WinitWindowEvent::CursorLeft { .. } => Some(WindowEvent::CursorLeft),
+            WinitWindowEvent::MouseWheel { delta, .. } => {
+                let (delta_x, delta_y) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (x as f64, y as f64),
+                    MouseScrollDelta::PixelDelta(pos) => (pos.x, pos.y),
+                };
+                Some(WindowEvent::MouseWheel { delta_x, delta_y })
+            }
+            WinitWindowEvent::MouseInput { state, button, .. } => Some(WindowEvent::MouseInput {
+                button: map_mouse_button(button),
+                state: map_mouse_state(state),
+                modifiers: self.modifiers,
+            }),
+
+            WinitWindowEvent::KeyboardInput { event, .. } => {
+                let key = match event.physical_key {
+                    PhysicalKey::Code(code) => map_key_code(code),
+                    PhysicalKey::Unidentified(_) => KeyCode::Unidentified,
+                };
+                Some(WindowEvent::KeyboardInput {
+                    key,
+                    state: map_key_state(event.state),
+                    modifiers: self.modifiers,
+                })
+            }
+
+            WinitWindowEvent::Ime(ime) => match ime {
+                WinitIme::Preedit(text, _) => Some(WindowEvent::Ime { preedit: text }),
+                WinitIme::Commit(text) => Some(WindowEvent::TextInput { text }),
+                WinitIme::Enabled | WinitIme::Disabled => None,
+            },
+
+            WinitWindowEvent::DroppedFile(path) => Some(WindowEvent::FileDropped { path }),
+            WinitWindowEvent::HoveredFile(path) => Some(WindowEvent::FileHovered { path }),
+            WinitWindowEvent::HoveredFileCancelled => Some(WindowEvent::FileHoverCancelled),
+
+            WinitWindowEvent::Touch(WinitTouch { id, phase, location, .. }) => {
+                Some(WindowEvent::Touch {
+                    id,
+                    phase: map_touch_phase(phase),
+                    position: (location.x, location.y),
+                })
+            }
+
+            _ => None,
         }
-        WinitWindowEvent::Focused(focused) => Some(WindowEvent::Focused(*focused)),
-        WinitWindowEvent::RedrawRequested => Some(WindowEvent::RedrawRequested),
-        WinitWindowEvent::CursorMoved { position, .. } => Some(WindowEvent::CursorMoved {
-            position: (position.x, position.y),
-        }),
-        WinitWindowEvent::CursorEntered { .. } => Some(WindowEvent::CursorEntered),
-        WinitWindowEvent::CursorLeft { .. } => Some(WindowEvent::CursorLeft),
-        WinitWindowEvent::MouseInput { state, button, .. } => Some(WindowEvent::MouseInput {
-            button: map_mouse_button(*button),
-            state: map_mouse_state(*state),
-            modifiers: Modifiers::NONE,
-        }),
-        WinitWindowEvent::KeyboardInput { event, .. } => {
-            let key = match event.physical_key {
-                PhysicalKey::Code(code) => map_key_code(code),
-                PhysicalKey::Unidentified(_) => KeyCode::Unidentified,
-            };
-            Some(WindowEvent::KeyboardInput {
-                key,
-                state: map_key_state(event.state),
-                modifiers: Modifiers::NONE,
-            })
-        }
-        _ => None,
     }
 }
 
@@ -194,6 +283,25 @@ fn map_key_state(state: ElementState) -> KeyState {
     match state {
         ElementState::Pressed => KeyState::Pressed,
         ElementState::Released => KeyState::Released,
+    }
+}
+
+fn map_touch_phase(phase: WinitTouchPhase) -> TouchPhase {
+    match phase {
+        WinitTouchPhase::Started => TouchPhase::Started,
+        WinitTouchPhase::Moved => TouchPhase::Moved,
+        WinitTouchPhase::Ended => TouchPhase::Ended,
+        WinitTouchPhase::Cancelled => TouchPhase::Cancelled,
+    }
+}
+
+fn map_modifiers(modifiers: &WinitModifiers) -> Modifiers {
+    let state = modifiers.state();
+    Modifiers {
+        shift: state.shift_key(),
+        ctrl: state.control_key(),
+        alt: state.alt_key(),
+        super_key: state.super_key(),
     }
 }
 
