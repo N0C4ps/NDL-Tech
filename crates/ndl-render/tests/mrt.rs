@@ -69,6 +69,8 @@ fn writes_different_colors_to_two_render_targets_in_one_draw_call() {
             width: 64,
             height: 64,
             format: Format::Bgra8Unorm,
+            mip_levels: 1,
+            array_layers: 1,
         })
         .expect("falha ao criar render target 0");
     let (texture1, rtv1) = device
@@ -76,6 +78,8 @@ fn writes_different_colors_to_two_render_targets_in_one_draw_call() {
             width: 64,
             height: 64,
             format: Format::Bgra8Unorm,
+            mip_levels: 1,
+            array_layers: 1,
         })
         .expect("falha ao criar render target 1");
 
@@ -227,6 +231,8 @@ fn begin_render_pass_rejects_mismatched_attachment_dimensions() {
             width: 64,
             height: 64,
             format: Format::Bgra8Unorm,
+            mip_levels: 1,
+            array_layers: 1,
         })
         .expect("falha ao criar render target 0");
     let (_t1, rtv1) = device
@@ -234,6 +240,8 @@ fn begin_render_pass_rejects_mismatched_attachment_dimensions() {
             width: 32,
             height: 32,
             format: Format::Bgra8Unorm,
+            mip_levels: 1,
+            array_layers: 1,
         })
         .expect("falha ao criar render target 1 (dimensão diferente)");
 
@@ -271,6 +279,8 @@ fn begin_render_pass_rejects_more_attachments_than_the_device_supports() {
                     width: 4,
                     height: 4,
                     format: Format::Bgra8Unorm,
+                    mip_levels: 1,
+                    array_layers: 1,
                 })
                 .expect("falha ao criar render target")
         })
@@ -349,6 +359,8 @@ fn set_pipeline_rejects_attachment_count_mismatch() {
             width: 16,
             height: 16,
             format: Format::Bgra8Unorm,
+            mip_levels: 1,
+            array_layers: 1,
         })
         .expect("falha ao criar render target");
     let context = device.context();

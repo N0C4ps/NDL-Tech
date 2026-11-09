@@ -158,8 +158,10 @@ fn draws_a_textured_pulsing_quad() {
                 width: 2,
                 height: 2,
                 format: Format::Rgba8Unorm,
+                mip_levels: 1,
+                array_layers: 1,
             },
-            &pixels,
+            &[&pixels],
         )
         .expect("falha ao criar textura");
     let texture_view = device

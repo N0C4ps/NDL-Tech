@@ -80,6 +80,19 @@ quebrou. O `BlendState` único de um pipeline já se aplica a todos os alvos
 igualmente (D3D11 sem `IndependentBlendEnable`); blend independente por
 alvo continua reservado.
 
+Mipmaps e texture arrays também já são reais em `Texture2D`:
+`TextureDescriptor::mip_levels`/`array_layers` cobrem tanto uma cadeia de
+mips já pronta (fornecida nível a nível a `Device::create_texture_2d`,
+na convenção de subresource do D3D11) quanto `mip_levels: 0` — cadeia
+completa gerada na própria GPU via `Context::generate_mips` a partir só
+do nível base, o caminho comum quando não há um pipeline de assets
+pré-filtrando texturas. Sem isso, qualquer textura vista à distância
+(câmera 3D de verdade) seria amostrada sempre no nível base, sofrendo
+aliasing e cache-miss; os testes (`tests/mipmaps.rs`) comparam
+`SampleLevel` no nível 0 contra o nível 1 de um padrão de alta frequência
+pra confirmar que o box filter da GPU rodou de verdade, não só que a
+textura foi criada.
+
 Pipelines podem declarar formatos esperados de cor e depth; o `RenderPass`
 confere esses formatos e dimensões antes de emitir draws. O estado fixo atual
 inclui rasterização, blend (incluindo alpha separado e máscara de canais) e

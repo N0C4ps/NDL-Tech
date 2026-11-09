@@ -27,7 +27,8 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA,
     D3D11_MAP_WRITE_DISCARD, D3D11_MAPPED_SUBRESOURCE, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
     D3D11_INPUT_PER_INSTANCE_DATA, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED,
-    D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS, D3D11_SAMPLER_DESC, D3D11_SDK_VERSION,
+    D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS, D3D11_RESOURCE_MISC_GENERATE_MIPS, D3D11_SAMPLER_DESC,
+    D3D11_SDK_VERSION,
     D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_MIRROR,
     D3D11_TEXTURE_ADDRESS_WRAP, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_DYNAMIC,
     D3D11CreateDevice, ID3D11Buffer, ID3D11CommandList, ID3D11DepthStencilState,
@@ -1173,55 +1174,113 @@ pub(crate) fn create_depth_stencil_view(
 pub(crate) fn create_texture_2d(
     device: &Device,
     desc: &crate::texture::TextureDescriptor,
-    data: &[u8],
+    mip_data: &[&[u8]],
 ) -> Result<crate::texture::Texture2D, GraphicsError> {
+    use crate::texture::{mip_dimensions, mip_subresource_index};
+
     let format = desc
         .format
         .to_dxgi_format()
         .ok_or(GraphicsError::Unsupported(
             "formato não suportado para textura",
         ))?;
+    let bytes_per_pixel = desc.format.bits_per_pixel() / 8;
+    let generated_chain = desc.mip_levels == 0;
 
     let texture_desc = D3D11_TEXTURE2D_DESC {
         Width: desc.width,
         Height: desc.height,
-        MipLevels: 1,
-        ArraySize: 1,
+        MipLevels: desc.mip_levels,
+        ArraySize: desc.array_layers,
         Format: format,
         SampleDesc: DXGI_SAMPLE_DESC {
             Count: 1,
             Quality: 0,
         },
         Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+        // GenerateMips exige o recurso também como render target (ver
+        // Context::generate_mips) além de shader resource.
+        BindFlags: if generated_chain {
+            (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32
+        } else {
+            D3D11_BIND_SHADER_RESOURCE.0 as u32
+        },
         CPUAccessFlags: 0,
-        MiscFlags: 0,
-    };
-
-    let bytes_per_pixel = desc.format.bits_per_pixel() / 8;
-    let initial_data = D3D11_SUBRESOURCE_DATA {
-        pSysMem: data.as_ptr() as *const _,
-        SysMemPitch: desc.width * bytes_per_pixel,
-        SysMemSlicePitch: 0,
+        MiscFlags: if generated_chain {
+            D3D11_RESOURCE_MISC_GENERATE_MIPS.0 as u32
+        } else {
+            0
+        },
     };
 
     let mut texture: Option<ID3D11Texture2D> = None;
     unsafe {
-        device
-            .raw
-            .device
-            .CreateTexture2D(&texture_desc, Some(&initial_data), Some(&mut texture))
+        if generated_chain {
+            // Drivers não aceitam inicializar todos os subresources de um
+            // recurso GENERATE_MIPS na criação — cria vazio e sobe o nível
+            // base de cada camada depois, via UpdateSubresource.
+            device
+                .raw
+                .device
+                .CreateTexture2D(&texture_desc, None, Some(&mut texture))
+        } else {
+            let initial_data: Vec<D3D11_SUBRESOURCE_DATA> = (0..desc.array_layers)
+                .flat_map(|layer| {
+                    (0..desc.mip_levels).map(move |mip| (mip, layer))
+                })
+                .map(|(mip, layer)| {
+                    let index = mip_subresource_index(mip, layer, desc.mip_levels) as usize;
+                    let (mip_w, _) = mip_dimensions(desc.width, desc.height, mip);
+                    D3D11_SUBRESOURCE_DATA {
+                        pSysMem: mip_data[index].as_ptr() as *const _,
+                        SysMemPitch: mip_w * bytes_per_pixel,
+                        SysMemSlicePitch: 0,
+                    }
+                })
+                .collect();
+            device.raw.device.CreateTexture2D(
+                &texture_desc,
+                Some(initial_data.as_ptr()),
+                Some(&mut texture),
+            )
+        }
     }
     .map_err(|err| GraphicsError::Backend(err.to_string()))?;
 
     let texture = texture
         .ok_or_else(|| GraphicsError::Backend("CreateTexture2D não retornou uma textura".into()))?;
 
+    let mip_levels = if generated_chain {
+        let mut created_desc = D3D11_TEXTURE2D_DESC::default();
+        unsafe {
+            texture.GetDesc(&mut created_desc);
+        }
+        unsafe {
+            for layer in 0..desc.array_layers {
+                let subresource =
+                    mip_subresource_index(0, layer, created_desc.MipLevels);
+                device.raw.context.UpdateSubresource(
+                    &texture,
+                    subresource,
+                    None,
+                    mip_data[layer as usize].as_ptr() as *const _,
+                    desc.width * bytes_per_pixel,
+                    0,
+                );
+            }
+        }
+        created_desc.MipLevels
+    } else {
+        desc.mip_levels
+    };
+
     Ok(crate::texture::Texture2D::from_raw(
         texture,
         desc.width,
         desc.height,
         desc.format,
+        mip_levels,
+        desc.array_layers,
     ))
 }
 
@@ -1280,7 +1339,14 @@ pub(crate) fn create_render_target_texture(
     })?;
 
     Ok((
-        crate::texture::Texture2D::from_raw(texture.clone(), desc.width, desc.height, desc.format),
+        crate::texture::Texture2D::from_raw(
+            texture.clone(),
+            desc.width,
+            desc.height,
+            desc.format,
+            1,
+            1,
+        ),
         crate::view::RenderTargetView::from_raw(
             render_target_view,
             desc.format,
