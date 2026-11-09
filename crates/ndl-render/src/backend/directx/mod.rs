@@ -11,12 +11,22 @@ use windows::Win32::Graphics::Direct3D::{
     D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_3,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-    D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
+    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11RenderTargetView, ID3D11Texture2D,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_DEBUG, D3D11_CREATE_DEVICE_FLAG,
+    D3D11_SDK_VERSION,
 };
-use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE};
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC,
+};
+use windows::Win32::Graphics::Dxgi::{
+    CreateDXGIFactory1, IDXGIDevice, IDXGIFactory1, IDXGIFactory2, IDXGISwapChain1,
+    DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
+    DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT,
+};
+use windows::core::Interface;
 
-use crate::core::{AdapterInfo, DeviceDescriptor, FeatureLevel, GraphicsError};
+use crate::core::{AdapterInfo, Device, DeviceDescriptor, FeatureLevel, GraphicsError};
+use crate::surface::{PresentMode, PresentResult, Surface, SwapchainDescriptor};
 
 /// Dispositivo D3D11 já criado: o device, o contexto imediato e o nível
 /// de recurso que a GPU/driver realmente concedeu.
@@ -128,6 +138,128 @@ pub(crate) fn enumerate_adapters() -> Result<Vec<AdapterInfo>, GraphicsError> {
     }
 
     Ok(adapters)
+}
+
+pub(crate) fn surface_from_handle(
+    handle: raw_window_handle::RawWindowHandle,
+) -> Result<Surface, GraphicsError> {
+    match handle {
+        raw_window_handle::RawWindowHandle::Win32(win32) => {
+            let hwnd = windows::Win32::Foundation::HWND(win32.hwnd.get() as *mut _);
+            Ok(Surface { hwnd })
+        }
+        _ => Err(GraphicsError::Unsupported(
+            "o backend Direct3D só aceita handles de janela Win32",
+        )),
+    }
+}
+
+/// Swapchain D3D11 já criada.
+pub(crate) struct RawSwapchain {
+    swapchain: IDXGISwapChain1,
+}
+
+pub(crate) fn create_swapchain(
+    device: &Device,
+    surface: &Surface,
+    desc: &SwapchainDescriptor,
+) -> Result<RawSwapchain, GraphicsError> {
+    let dxgi_device: IDXGIDevice = device
+        .raw
+        .device
+        .cast()
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let adapter = unsafe { dxgi_device.GetAdapter() }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let factory: IDXGIFactory2 = unsafe { adapter.GetParent() }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let format = desc
+        .format
+        .to_dxgi_format()
+        .ok_or(GraphicsError::Unsupported("formato não suportado para swapchain"))?;
+
+    let swap_chain_desc = DXGI_SWAP_CHAIN_DESC1 {
+        Width: desc.size.width,
+        Height: desc.size.height,
+        Format: format,
+        Stereo: false.into(),
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
+        BufferCount: desc.buffer_count,
+        Scaling: DXGI_SCALING_STRETCH,
+        SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
+        AlphaMode: DXGI_ALPHA_MODE_IGNORE,
+        Flags: 0,
+    };
+
+    let swapchain = unsafe {
+        factory.CreateSwapChainForHwnd(
+            &device.raw.device,
+            surface.hwnd,
+            &swap_chain_desc,
+            None,
+            None,
+        )
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    Ok(RawSwapchain { swapchain })
+}
+
+pub(crate) fn resize_swapchain(
+    raw: &mut RawSwapchain,
+    width: u32,
+    height: u32,
+) -> Result<(), GraphicsError> {
+    unsafe { raw.swapchain.ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG(0)) }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))
+}
+
+/// Limpa o back buffer atual e apresenta — atalho temporário até
+/// `context`/`render` existirem de verdade (ver doc de
+/// `Swapchain::clear_and_present`).
+pub(crate) fn clear_and_present(
+    device: &Device,
+    raw: &RawSwapchain,
+    color: [f32; 4],
+    present_mode: PresentMode,
+) -> Result<PresentResult, GraphicsError> {
+    let back_buffer: ID3D11Texture2D = unsafe { raw.swapchain.GetBuffer(0) }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let mut render_target_view: Option<ID3D11RenderTargetView> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateRenderTargetView(&back_buffer, None, Some(&mut render_target_view))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let render_target_view = render_target_view.ok_or_else(|| {
+        GraphicsError::Backend("CreateRenderTargetView não retornou uma view".into())
+    })?;
+
+    unsafe {
+        device.raw.context.ClearRenderTargetView(&render_target_view, &color);
+    }
+
+    // VSync por padrão: "liso" numa GPU topo de linha não significa nada
+    // numa GPU mais modesta — nunca presumimos Immediate sem o jogo pedir.
+    let sync_interval = match present_mode {
+        PresentMode::VSync => 1,
+        PresentMode::Immediate => 0,
+    };
+
+    let present_result = unsafe { raw.swapchain.Present(sync_interval, DXGI_PRESENT(0)) };
+    if present_result.is_err() {
+        return Err(GraphicsError::Backend(present_result.message()));
+    }
+
+    Ok(PresentResult::Ok)
 }
 
 // ---------------------------------------------------------------------

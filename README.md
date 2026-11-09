@@ -49,15 +49,28 @@ funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
 `ndl-render` tem a árvore de módulos inteira reservada (`context`, `command`,
 `queue`, `resource`, `memory`, `buffer`, `texture`, `view`, `shader`,
 `pipeline`, `input`, `raster`, `blend`, `depth_stencil`, `sampler`, `render`,
-`compute`, `transfer`, `query`, `sync`, `debug`, `surface`), cada uma
-documentada com os tipos e métodos planejados — mas ainda sem implementação.
+`compute`, `transfer`, `query`, `sync`, `debug`), cada uma documentada com
+os tipos e métodos planejados — mas ainda sem implementação.
 
-`ndl-render::core` e `ndl-render::format` já são **reais**: `Device::new()`
-cria um dispositivo Direct3D 11 de verdade (via `backend::directx`,
-`windows-rs`), com `DeviceCapabilities`/`DeviceLimits` derivados do
-`FeatureLevel` obtido, `Instance::enumerate_adapters()` lista as GPUs do
-sistema via DXGI, e `Format` cobre as principais famílias de pixel format
-com conversão para/do `DXGI_FORMAT` nativo.
+`ndl-render::core`, `ndl-render::format` e `ndl-render::surface` já são
+**reais**: `Device::new()` cria um dispositivo Direct3D 11 de verdade (via
+`backend::directx`, `windows-rs`), com `DeviceCapabilities`/`DeviceLimits`
+derivados do `FeatureLevel` obtido; `Instance::enumerate_adapters()` lista
+as GPUs do sistema via DXGI; `Format` cobre as principais famílias de pixel
+format com conversão para/do `DXGI_FORMAT` nativo; e `Surface`/`Swapchain`
+conectam um `RawWindowHandle` (crate `raw-window-handle`) a uma swapchain
+real, com `clear_and_present` já limpando e apresentando quadros numa
+janela de verdade.
+
+**`ndl-render` nunca depende de `ndl-platform`** (nem de nenhuma outra lib
+de janela) — `Surface::from_window_handle` recebe um `RawWindowHandle`
+genérico; é sempre o código do jogo que extrai esse handle de onde a janela
+foi criada e o entrega ao render. O teste `tests/surface_triangle.rs` prova
+isso abrindo uma janela Win32 crua, sem tocar em `ndl-platform`.
+
+Por padrão, `Swapchain::present` usa `PresentMode::VSync` — "liso" numa GPU
+topo de linha não significa nada numa GPU mais modesta, então a crate nunca
+assume um present sem limite de quadros como padrão.
 
 ## Crate fachada `ndl`
 

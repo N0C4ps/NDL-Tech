@@ -6,6 +6,13 @@ license.workspace = true
 repository.workspace = true
 description = "Abstrações de renderização do ecossistema NDL sobre backends gráficos (Direct3D 11, depois outros)."
 
+[dependencies]
+# Handle de janela genérico e multiplataforma — ndl-render nunca depende de
+# ndl-platform (ou de qualquer outra lib de janela) diretamente; a conexão
+# entre as duas é feita pelo código do jogo, que extrai um RawWindowHandle
+# de onde quer que tenha a janela e entrega para ndl-render::surface.
+raw-window-handle = "0.6"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Graphics_Direct3D",
@@ -13,4 +20,10 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Foundation",
+    # Só para os testes de integração abrirem uma janela Win32 crua, sem
+    # depender de ndl-platform — prova que ndl-render funciona com
+    # qualquer handle de janela.
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+    "Win32_Graphics_Gdi",
 ] }
