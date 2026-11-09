@@ -1,9 +1,20 @@
-use ndl_platform::core::{Platform, PlatformConfig};
+use ndl_platform::core::{Platform, PlatformBackendKind, PlatformConfig};
 use ndl_platform::window::WindowDescriptor;
+
+/// Estes testes exercitam o caminho leve de criação de janela
+/// (`Platform::create_window`), que só existe no backend `headless` —
+/// o backend nativo real abre janela de SO via `Platform::run_window`.
+fn headless_platform() -> Platform {
+    Platform::new(PlatformConfig {
+        backend: PlatformBackendKind::Headless,
+        ..Default::default()
+    })
+    .expect("platform init")
+}
 
 #[test]
 fn create_window_with_defaults() {
-    let platform = Platform::new(PlatformConfig::default()).expect("platform init");
+    let platform = headless_platform();
     let window = platform
         .create_window(WindowDescriptor::default())
         .expect("window creation");
@@ -15,7 +26,7 @@ fn create_window_with_defaults() {
 
 #[test]
 fn window_methods_mutate_local_state() {
-    let platform = Platform::new(PlatformConfig::default()).expect("platform init");
+    let platform = headless_platform();
     let mut window = platform
         .create_window(WindowDescriptor::default())
         .expect("window creation");
@@ -36,7 +47,7 @@ fn window_methods_mutate_local_state() {
 
 #[test]
 fn cursor_defaults_to_visible_default_icon() {
-    let platform = Platform::new(PlatformConfig::default()).expect("platform init");
+    let platform = headless_platform();
     let mut window = platform
         .create_window(WindowDescriptor::default())
         .expect("window creation");

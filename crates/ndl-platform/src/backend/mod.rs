@@ -3,24 +3,24 @@
 //! Este módulo é **inteiramente privado**: nada aqui é exposto na API
 //! pública da crate. Cada backend concreto (Windows, Linux/X11, Linux/
 //! Wayland, macOS, Headless) implementa o mesmo contrato interno
-//! [`BackendHandle`], e o restante da crate programa apenas contra esse
+//! [`Backend`], e o restante da crate programa apenas contra esse
 //! contrato — nunca contra um backend específico.
 //!
-//! Hoje só o backend `headless` está implementado; os demais existem como
-//! stubs reservando o lugar na árvore de módulos para quando a integração
-//! real com cada SO (provavelmente via `winit` ou chamadas nativas) for
-//! escrita.
+//! Hoje `headless` (simulação em memória, sem SO) e `windows` (via `winit`,
+//! com janela real) estão implementados; `linux`/`macos` existem como
+//! stubs reservando o lugar na árvore de módulos.
 
 mod headless;
 #[allow(dead_code)]
 mod linux;
 #[allow(dead_code)]
 mod macos;
-#[allow(dead_code)]
+#[cfg(target_os = "windows")]
 mod windows;
 
 use crate::core::{PlatformBackendKind, PlatformCapabilities};
 use crate::error::PlatformError;
+use crate::event::WindowEvent;
 use crate::monitor::MonitorInfo;
 use crate::window::{WindowDescriptor, WindowId};
 
@@ -29,8 +29,24 @@ pub(crate) trait Backend {
     fn capabilities(&self) -> PlatformCapabilities;
     fn monitors(&self) -> Vec<MonitorInfo>;
     fn primary_monitor(&self) -> Option<MonitorInfo>;
+
+    /// Cria uma janela "leve": sem superfície real de SO, com estado
+    /// mantido apenas em memória (usado pelo backend `headless`, para
+    /// testes e CI).
     fn create_window(&self, descriptor: &WindowDescriptor) -> Result<WindowId, PlatformError>;
     fn destroy_window(&self, id: WindowId);
+
+    /// Abre uma janela real do sistema operacional e assume o controle da
+    /// thread atual, bombeando o loop de mensagens do SO até que o jogo
+    /// decida encerrar (normalmente ao receber `WindowEvent::CloseRequested`).
+    ///
+    /// Backends sem janela real (`headless`) retornam
+    /// [`PlatformError::Unsupported`].
+    fn run(
+        &self,
+        descriptor: WindowDescriptor,
+        on_event: Box<dyn FnMut(WindowEvent)>,
+    ) -> Result<(), PlatformError>;
 }
 
 pub(crate) type BackendHandle = Box<dyn Backend>;
@@ -39,9 +55,17 @@ pub(crate) fn create(kind: PlatformBackendKind) -> Result<BackendHandle, Platfor
     match kind {
         PlatformBackendKind::Headless => Ok(Box::new(headless::HeadlessBackend::new())),
         PlatformBackendKind::Native => {
-            // Nenhum backend nativo real está implementado ainda; cai para
-            // headless como base funcional até windows/linux/macos existirem.
-            Ok(Box::new(headless::HeadlessBackend::new()))
+            #[cfg(target_os = "windows")]
+            {
+                Ok(Box::new(windows::WindowsBackend::new()))
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                // Nenhum backend nativo real está implementado ainda para
+                // este SO; cai para headless como base funcional até
+                // linux/macos existirem.
+                Ok(Box::new(headless::HeadlessBackend::new()))
+            }
         }
     }
 }

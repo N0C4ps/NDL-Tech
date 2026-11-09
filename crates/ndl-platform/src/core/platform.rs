@@ -1,6 +1,8 @@
 use super::{ApplicationState, PlatformCapabilities};
 use crate::backend::{self, BackendHandle};
 use crate::error::PlatformError;
+use crate::event::WindowEvent;
+use crate::window::WindowDescriptor;
 
 /// Sistema operacional detectado (ou forçado) em que a plataforma está rodando.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,5 +98,22 @@ impl Platform {
     #[allow(dead_code)] // usado quando o event loop passar a atualizar o estado a partir de AppEvent
     pub(crate) fn set_state(&mut self, state: ApplicationState) {
         self.state = state;
+    }
+
+    /// Abre uma janela **real** do sistema operacional e assume o controle
+    /// da thread atual até que o jogo peça para encerrar (normalmente ao
+    /// receber `WindowEvent::CloseRequested` em `on_event`).
+    ///
+    /// Esse é o caminho usado por um jogo de verdade — em contraste com
+    /// [`Platform::create_window`] + [`crate::event::EventLoop`], que
+    /// continuam existindo como caminho leve/testável (usado pelo backend
+    /// `headless`). Backends sem janela real retornam
+    /// [`PlatformError::Unsupported`].
+    pub fn run_window(
+        &self,
+        descriptor: WindowDescriptor,
+        on_event: impl FnMut(WindowEvent) + 'static,
+    ) -> Result<(), PlatformError> {
+        self.backend.run(descriptor, Box::new(on_event))
     }
 }

@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::backend::Backend;
 use crate::core::PlatformCapabilities;
 use crate::error::PlatformError;
+use crate::event::WindowEvent;
 use crate::monitor::MonitorInfo;
 use crate::window::{WindowDescriptor, WindowId};
 
@@ -42,4 +43,14 @@ impl Backend for HeadlessBackend {
     }
 
     fn destroy_window(&self, _id: WindowId) {}
+
+    fn run(
+        &self,
+        _descriptor: WindowDescriptor,
+        _on_event: Box<dyn FnMut(WindowEvent)>,
+    ) -> Result<(), PlatformError> {
+        Err(PlatformError::Unsupported(
+            "backend headless não abre janelas reais; use PlatformBackendKind::Native",
+        ))
+    }
 }
