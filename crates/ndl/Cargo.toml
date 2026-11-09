@@ -1,0 +1,35 @@
+[package]
+name = "ndl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fachada pública do ecossistema NDL: reexporta as crates do framework via feature flags."
+
+[dependencies]
+ndl-math = { path = "../ndl-math", optional = true }
+ndl-platform = { path = "../ndl-platform", optional = true }
+ndl-render = { path = "../ndl-render", optional = true }
+ndl-config = { path = "../ndl-config", optional = true }
+ndl-dependencys = { path = "../ndl-dependencys", optional = true }
+ndl-diagnostics = { path = "../ndl-diagnostics", optional = true }
+ndl-logger = { path = "../ndl-logger", optional = true }
+
+[features]
+default = []
+math = ["ndl-math"]
+platform = ["ndl-platform"]
+render = ["ndl-render"]
+config = ["ndl-config"]
+dependencys = ["ndl-dependencys"]
+diagnostics = ["ndl-diagnostics"]
+logger = ["ndl-logger"]
+full = [
+    "math",
+    "platform",
+    "render",
+    "config",
+    "dependencys",
+    "diagnostics",
+    "logger",
+]

@@ -2,3 +2,7 @@
 Cargo.lock
 .vscode/
 *.pdb
+
+# Sandbox local para testar as crates publicadas via dependência git (não
+# arquivo local) — nunca deve ser versionado junto do workspace.
+/playground/

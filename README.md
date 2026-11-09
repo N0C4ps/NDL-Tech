@@ -47,10 +47,29 @@ cursor, monitores), mas ainda só com o backend `headless` — os backends
 nativos (`windows`, `linux/x11`, `linux/wayland`, `macos`) existem na árvore
 de módulos como stubs reservados para a integração real com cada SO.
 
+## Crate fachada `ndl`
+
+A crate `ndl` reexporta as demais crates via feature flags, para quem
+prefere depender de um único pacote:
+
+```toml
+[dependencies]
+ndl = { git = "https://github.com/N0C4ps/NDL-Tech.git", features = ["math", "platform"] }
+```
+
+```rust
+use ndl::platform::core::{Platform, PlatformConfig};
+use ndl::math::Vec3;
+```
+
+Habilitar uma feature só traz aquela crate para a árvore de dependências —
+nenhuma funcionalidade extra é ativada por padrão (`default = []`). Features
+disponíveis hoje: `math`, `platform`, `render`, `config`, `dependencys`,
+`diagnostics`, `logger`, e `full` (todas juntas).
+
 Crates planejadas para rodadas futuras: `ndl-jobs`, `ndl-runtime`,
 `ndl-physics`, `ndl-audio`, `ndl-input` (hoje parte de `ndl-platform`),
-`ndl-assets`, `ndl-anim`, além de uma crate fachada `ndl` que reexporta as
-demais via feature flags (ex: `use ndl::render::...`).
+`ndl-assets`, `ndl-anim`.
 
 ## Build
 
