@@ -16,8 +16,8 @@
 //! (`Buffer::raw`, `Context::raw`, ...), e um método por operação que hoje
 //! vira uma chamada nativa (`create_buffer`, `draw`, `set_pipeline`, ...).
 //! O backend ativo é escolhido **em tempo de compilação**, via feature do
-//! Cargo (`backend-directx11` hoje; `backend-directx12`/`backend-vulkan`
-//! reservados) — isso é o que permite `ActiveBackend` abaixo resolver pra
+//! Cargo (`backend-d3d11`/`backend-d3d12` hoje; `backend-vulkan`
+//! reservado) — isso é o que permite `ActiveBackend` abaixo resolver pra
 //! um tipo concreto sem nenhum `dyn`/vtable: tudo monomorphiza, sem custo
 //! de indireção numa chamada de draw.
 //!
@@ -28,22 +28,35 @@
 //!
 //! ## Backends disponíveis
 //!
-//! Hoje só `directx` (Direct3D 11, via `windows-rs`) tem implementação
-//! real, atrás da feature `backend-directx11` — a única habilitada por
-//! padrão. Reservado para `d3d12`/`vulkan`/`metal` depois, seguindo o
-//! mesmo padrão de `ndl-platform` (um backend por plataforma/API, atrás
-//! de uma única API pública consistente).
+//! `d3d11` (Direct3D 11) e `d3d12` (Direct3D 12), cada um na sua própria
+//! pasta — nem todo mundo tem/precisa de D3D12, então habilitar um nunca
+//! traz o código nem as dependências do outro para a árvore. `backend-d3d11`
+//! é a única feature habilitada por padrão; se as duas estiverem ativas ao
+//! mesmo tempo (ex: alguém pede `--features backend-d3d12` sem desligar o
+//! padrão), `d3d12` tem prioridade. `d3d11` cobre toda a API portátil hoje;
+//! `d3d12` ainda é uma implementação inicial (ver `//!` de
+//! [`d3d12`] para o que já é real vs. reservado). Reservado para
+//! `vulkan`/`metal` depois, seguindo o mesmo padrão de `ndl-platform` (um
+//! backend por plataforma/API, atrás de uma única API pública consistente).
 
-#[cfg(feature = "backend-directx11")]
-pub(crate) mod directx;
+#[cfg(feature = "backend-d3d11")]
+pub(crate) mod d3d11;
+#[cfg(feature = "backend-d3d12")]
+pub(crate) mod d3d12;
 
-#[cfg(all(feature = "backend-directx11", target_os = "windows"))]
-pub(crate) type ActiveBackend = directx::DirectX11;
+#[cfg(all(feature = "backend-d3d12", target_os = "windows"))]
+pub(crate) type ActiveBackend = d3d12::D3D12Backend;
 
-#[cfg(not(all(feature = "backend-directx11", target_os = "windows")))]
+#[cfg(all(feature = "backend-d3d11", not(feature = "backend-d3d12"), target_os = "windows"))]
+pub(crate) type ActiveBackend = d3d11::D3D11Backend;
+
+#[cfg(not(any(
+    all(feature = "backend-d3d11", target_os = "windows"),
+    all(feature = "backend-d3d12", target_os = "windows")
+)))]
 compile_error!(
-    "nenhum backend gráfico ativo: habilite a feature \"backend-directx11\" (hoje, o único \
-     backend real, disponível só em builds Windows) — ver crates/ndl-render/Cargo.toml"
+    "nenhum backend gráfico ativo: habilite a feature \"backend-d3d11\" ou \"backend-d3d12\" \
+     (disponíveis só em builds Windows) — ver crates/ndl-render/Cargo.toml"
 );
 
 use crate::blend::{BlendState, BlendStateDescriptor};
@@ -69,16 +82,19 @@ use crate::view::{DepthStencilView, RenderTargetView, ShaderResourceView, Unorde
 /// Contrato interno que todo backend gráfico deve implementar — ver o
 /// `//!` deste módulo. Puramente associativo (sem `&self`): a própria
 /// crate escolhe `ActiveBackend` em tempo de compilação, então um backend
-/// é só um marcador de tipo (`enum DirectX11 {}`, sem instância).
+/// é só um marcador de tipo (`enum D3D11Backend {}`, sem instância).
 pub(crate) trait Backend: Sized {
     // --- tipos nativos guardados dentro dos tipos públicos ---
     //
     // `Clone` porque os tipos públicos (`GraphicsPipeline`, binds de
     // `Context`, ...) clonam esses handles livremente, do mesmo jeito que
-    // já fazem hoje com `ID3D11X::clone()` (ref-count de COM) — isso é o
-    // que permite `pipeline.rs` montar `GraphicsPipeline` sem nenhum
-    // método de trait próprio, só clonando os `raw` já abstraídos de
-    // shaders/estados já criados.
+    // o D3D11 já faz hoje com `ID3D11X::clone()` (ref-count de COM) —
+    // `assemble_graphics_pipeline`/`assemble_compute_pipeline` abaixo são o
+    // único ponto em que um backend decide se isso é só clonar handles já
+    // prontos (D3D11: rasterizer/blend/depth-stencil já são objetos de GPU
+    // separados) ou se precisa de uma chamada nativa própria (D3D12: não
+    // existem objetos de estado separados, só um PSO montado na hora —
+    // `CreateGraphicsPipelineState`).
     type RawDevice;
     type RawContext;
     type RawCommandBuffer;
@@ -177,6 +193,15 @@ pub(crate) trait Backend: Sized {
     ) -> Result<crate::input::InputLayout, GraphicsError>;
 
     // --- estados fixos e pipelines ---
+    //
+    // `RawGraphicsPipeline`/`RawComputePipeline` são opacos de propósito —
+    // cada backend decide a forma interna (D3D11: um bundle dos objetos de
+    // estado/shader já criados separadamente, clonados; D3D12: um PSO
+    // montado numa única chamada nativa + a root signature que `set_pipeline`
+    // precisa vincular junto). Ver `assemble_graphics_pipeline` abaixo.
+    type RawGraphicsPipeline;
+    type RawComputePipeline;
+
     fn create_rasterizer_state(
         device: &Device,
         desc: &RasterizerStateDescriptor,
@@ -189,6 +214,30 @@ pub(crate) trait Backend: Sized {
         device: &Device,
         desc: &DepthStencilStateDescriptor,
     ) -> Result<DepthStencilState, GraphicsError>;
+    /// Monta o pipeline gráfico final a partir de `desc` e dos estados já
+    /// criados (`create_rasterizer_state`/`create_blend_state`/
+    /// `create_depth_stencil_state`) — para D3D11, isso é só agrupar os
+    /// handles; para D3D12, é a chamada real que cria o PSO.
+    /// `color_formats` vazio = nenhum formato declarado (caminho de
+    /// [`crate::pipeline::GraphicsPipelineDescriptor`] sem estado
+    /// explícito).
+    #[allow(clippy::too_many_arguments)]
+    fn assemble_graphics_pipeline(
+        device: &Device,
+        desc: &crate::pipeline::GraphicsPipelineDescriptor<'_>,
+        rasterizer: RasterizerState,
+        blend: BlendState,
+        depth_stencil: DepthStencilState,
+        color_formats: &[Format],
+        depth_format: Option<Format>,
+        stencil_reference: u32,
+    ) -> Result<Self::RawGraphicsPipeline, GraphicsError>;
+    /// Como `assemble_graphics_pipeline`, mas para o pipeline de computação
+    /// (só o compute shader, sem estados fixos).
+    fn assemble_compute_pipeline(
+        device: &Device,
+        desc: &crate::pipeline::ComputePipelineDescriptor<'_>,
+    ) -> Result<Self::RawComputePipeline, GraphicsError>;
 
     // --- contexto: binds, clears, draws ---
     fn set_render_target(context: &Context, view: &RenderTargetView);

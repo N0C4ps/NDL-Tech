@@ -1,9 +1,10 @@
 //! `ndl-render` fornece a infraestrutura de renderização do ecossistema NDL.
 //!
 //! Esta crate **não implementa uma API gráfica própria**: ela abstrai
-//! backends gráficos existentes (prioritariamente Direct3D via `backend::directx`
-//! nesta fase, podendo se estender a Vulkan/Metal/GL depois) para aumentar a
-//! eficiência de quem constrói jogos sobre o NDL.
+//! backends gráficos existentes (Direct3D 11 e 12, via `backend::d3d11`/
+//! `backend::d3d12` — ver `backend::Backend` —, podendo se estender a
+//! Vulkan/Metal/GL depois) para aumentar a eficiência de quem constrói
+//! jogos sobre o NDL.
 //!
 //! Assim como as demais crates do NDL, `ndl-render` não conhece nada sobre
 //! física, áudio, ECS ou qualquer outra lógica de jogo. Ela também não

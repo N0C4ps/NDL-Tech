@@ -81,11 +81,11 @@ impl Device {
     }
 
     pub fn backend_api(&self) -> super::BackendApi {
-        #[cfg(feature = "backend-directx11")]
+        #[cfg(feature = "backend-d3d11")]
         {
             super::BackendApi::Direct3D11
         }
-        #[cfg(not(feature = "backend-directx11"))]
+        #[cfg(not(feature = "backend-d3d11"))]
         {
             super::BackendApi::Unknown
         }

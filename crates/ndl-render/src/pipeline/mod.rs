@@ -33,15 +33,15 @@ pub struct GraphicsPipelineDescriptor<'a> {
 
 /// Um pipeline gráfico: todo o estado necessário para emitir um `draw()`
 /// — hoje, vertex/pixel shader, input layout e topologia.
+///
+/// `raw` é opaco de propósito: cada backend decide a forma interna (ver
+/// [`crate::backend::Backend::assemble_graphics_pipeline`]) — D3D11 agrupa
+/// os objetos de estado já criados separadamente; D3D12 monta um PSO numa
+/// única chamada. `color_formats`/`depth_format` continuam campos comuns
+/// porque [`crate::render::RenderPass`] precisa deles pra validar
+/// attachments sem conhecer o backend.
 pub struct GraphicsPipeline {
-    pub(crate) vertex_shader: <ActiveBackend as Backend>::RawVertexShader,
-    pub(crate) pixel_shader: <ActiveBackend as Backend>::RawPixelShader,
-    pub(crate) input_layout: <ActiveBackend as Backend>::RawInputLayout,
-    pub(crate) primitive_topology: PrimitiveTopology,
-    pub(crate) rasterizer_state: <ActiveBackend as Backend>::RawRasterizerState,
-    pub(crate) blend_state: <ActiveBackend as Backend>::RawBlendState,
-    pub(crate) depth_stencil_state: <ActiveBackend as Backend>::RawDepthStencilState,
-    pub(crate) stencil_reference: u32,
+    pub(crate) raw: <ActiveBackend as Backend>::RawGraphicsPipeline,
     /// Vazio = nenhum formato declarado (caminho de
     /// [`Device::create_graphics_pipeline`], sem checagem de attachment).
     /// Não vazio = um formato por alvo de cor, na ordem vinculada por
@@ -74,17 +74,13 @@ impl Device {
         let blend = self.create_blend_state(&BlendStateDescriptor::default())?;
         let depth_stencil =
             self.create_depth_stencil_state(&DepthStencilStateDescriptor::disabled())?;
+        let raw = ActiveBackend::assemble_graphics_pipeline(
+            self, desc, rasterizer, blend, depth_stencil, &[], None, 0,
+        )?;
         Ok(GraphicsPipeline {
-            vertex_shader: desc.vertex_shader.raw.clone(),
-            pixel_shader: desc.pixel_shader.raw.clone(),
-            input_layout: desc.input_layout.raw.clone(),
-            primitive_topology: desc.primitive_topology,
-            rasterizer_state: rasterizer.raw,
-            blend_state: blend.raw,
-            depth_stencil_state: depth_stencil.raw,
+            raw,
             color_formats: Vec::new(),
             depth_format: None,
-            stencil_reference: 0,
         })
     }
 
@@ -156,17 +152,20 @@ impl Device {
         let rasterizer = self.create_rasterizer_state(&state.rasterizer)?;
         let blend = self.create_blend_state(&state.blend)?;
         let depth_stencil = self.create_depth_stencil_state(&state.depth_stencil)?;
+        let raw = ActiveBackend::assemble_graphics_pipeline(
+            self,
+            desc,
+            rasterizer,
+            blend,
+            depth_stencil,
+            state.color_formats,
+            state.depth_format,
+            state.stencil_reference as u32,
+        )?;
         Ok(GraphicsPipeline {
-            vertex_shader: desc.vertex_shader.raw.clone(),
-            pixel_shader: desc.pixel_shader.raw.clone(),
-            input_layout: desc.input_layout.raw.clone(),
-            primitive_topology: desc.primitive_topology,
-            rasterizer_state: rasterizer.raw,
-            blend_state: blend.raw,
-            depth_stencil_state: depth_stencil.raw,
+            raw,
             color_formats: state.color_formats.to_vec(),
             depth_format: state.depth_format,
-            stencil_reference: state.stencil_reference as u32,
         })
     }
 
@@ -180,7 +179,7 @@ impl Device {
             });
         }
         Ok(ComputePipeline {
-            compute_shader: desc.compute_shader.raw.clone(),
+            raw: ActiveBackend::assemble_compute_pipeline(self, desc)?,
         })
     }
 }
@@ -190,7 +189,8 @@ pub struct ComputePipelineDescriptor<'a> {
     pub compute_shader: &'a ComputeShader,
 }
 
-/// Um pipeline de computação: hoje, só o compute shader em si.
+/// Um pipeline de computação — ver `raw` em [`GraphicsPipeline`] pro porquê
+/// de ser opaco.
 pub struct ComputePipeline {
-    pub(crate) compute_shader: <ActiveBackend as Backend>::RawComputeShader,
+    pub(crate) raw: <ActiveBackend as Backend>::RawComputePipeline,
 }

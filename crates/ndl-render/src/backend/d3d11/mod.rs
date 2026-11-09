@@ -1688,7 +1688,7 @@ pub(crate) fn present(
 // ---------------------------------------------------------------------
 
 // =======================================================================
-// impl Backend for DirectX11 — o contrato único que o resto da crate usa
+// impl Backend for D3D11Backend — o contrato único que o resto da crate usa
 // (ver `crate::backend::Backend`). Os métodos abaixo ou delegam direto
 // pras funções livres acima (criação de recursos — já existiam antes
 // desta rodada, lógica inalterada), ou contêm a lógica que antes ficava
@@ -1712,8 +1712,8 @@ use crate::texture::TextureDescriptor;
 use crate::view::{DepthStencilView, RenderTargetView, ShaderResourceView, UnorderedAccessView};
 
 /// Marcador de tipo do backend Direct3D 11 — sem instância (nunca
-/// construído), só o que `impl Backend for DirectX11` precisa pra existir.
-pub(crate) enum DirectX11 {}
+/// construído), só o que `impl Backend for D3D11Backend` precisa pra existir.
+pub(crate) enum D3D11Backend {}
 
 fn device_context_raw(raw: &RawDevice) -> ID3D11DeviceContext {
     raw.context.clone()
@@ -1868,23 +1868,70 @@ fn topology_to_d3d(
     }
 }
 
+/// Forma interna de `GraphicsPipeline::raw` neste backend — D3D11 não tem
+/// um objeto de PSO monolítico, então isso é só um bundle dos objetos de
+/// estado/shader já criados separadamente (ver `assemble_graphics_pipeline_raw`).
+pub(crate) struct D3D11GraphicsPipeline {
+    vertex_shader: ID3D11VertexShader,
+    pixel_shader: ID3D11PixelShader,
+    input_layout: ID3D11InputLayout,
+    primitive_topology: crate::input::PrimitiveTopology,
+    rasterizer_state: ID3D11RasterizerState,
+    blend_state: windows::Win32::Graphics::Direct3D11::ID3D11BlendState,
+    depth_stencil_state: ID3D11DepthStencilState,
+    stencil_reference: u32,
+}
+
+/// Forma interna de `ComputePipeline::raw` neste backend.
+pub(crate) struct D3D11ComputePipeline {
+    compute_shader: windows::Win32::Graphics::Direct3D11::ID3D11ComputeShader,
+}
+
+fn assemble_graphics_pipeline_raw(
+    desc: &crate::pipeline::GraphicsPipelineDescriptor<'_>,
+    rasterizer: RasterizerState,
+    blend: BlendState,
+    depth_stencil: DepthStencilState,
+    stencil_reference: u32,
+) -> D3D11GraphicsPipeline {
+    D3D11GraphicsPipeline {
+        vertex_shader: desc.vertex_shader.raw.clone(),
+        pixel_shader: desc.pixel_shader.raw.clone(),
+        input_layout: desc.input_layout.raw.clone(),
+        primitive_topology: desc.primitive_topology,
+        rasterizer_state: rasterizer.raw,
+        blend_state: blend.raw,
+        depth_stencil_state: depth_stencil.raw,
+        stencil_reference,
+    }
+}
+
+fn assemble_compute_pipeline_raw(
+    desc: &crate::pipeline::ComputePipelineDescriptor<'_>,
+) -> D3D11ComputePipeline {
+    D3D11ComputePipeline {
+        compute_shader: desc.compute_shader.raw.clone(),
+    }
+}
+
 fn set_pipeline_raw(context: &Context, pipeline: &GraphicsPipeline) {
     unsafe {
-        context.raw.RSSetState(&pipeline.rasterizer_state);
+        context.raw.RSSetState(&pipeline.raw.rasterizer_state);
         context.raw.OMSetBlendState(
-            &pipeline.blend_state,
+            &pipeline.raw.blend_state,
             Some(&[1.0, 1.0, 1.0, 1.0]),
             0xffffffff,
         );
+        context.raw.OMSetDepthStencilState(
+            &pipeline.raw.depth_stencil_state,
+            pipeline.raw.stencil_reference,
+        );
+        context.raw.IASetInputLayout(&pipeline.raw.input_layout);
+        context.raw.VSSetShader(&pipeline.raw.vertex_shader, None);
+        context.raw.PSSetShader(&pipeline.raw.pixel_shader, None);
         context
             .raw
-            .OMSetDepthStencilState(&pipeline.depth_stencil_state, pipeline.stencil_reference);
-        context.raw.IASetInputLayout(&pipeline.input_layout);
-        context.raw.VSSetShader(&pipeline.vertex_shader, None);
-        context.raw.PSSetShader(&pipeline.pixel_shader, None);
-        context
-            .raw
-            .IASetPrimitiveTopology(topology_to_d3d(pipeline.primitive_topology));
+            .IASetPrimitiveTopology(topology_to_d3d(pipeline.raw.primitive_topology));
     }
 }
 
@@ -1959,7 +2006,7 @@ fn update_buffer_raw(context: &Context, buffer: &Buffer, data: &[u8]) {
 
 fn set_compute_pipeline_raw(context: &Context, pipeline: &ComputePipeline) {
     unsafe {
-        context.raw.CSSetShader(&pipeline.compute_shader, None);
+        context.raw.CSSetShader(&pipeline.raw.compute_shader, None);
     }
 }
 
@@ -2027,7 +2074,7 @@ fn end_query_raw(context: &Context, query: &Query) {
     }
 }
 
-impl crate::backend::Backend for DirectX11 {
+impl crate::backend::Backend for D3D11Backend {
     type RawDevice = RawDevice;
     type RawContext = ID3D11DeviceContext;
     type RawCommandBuffer = ID3D11CommandList;
@@ -2048,6 +2095,8 @@ impl crate::backend::Backend for DirectX11 {
     type RawQuery = ID3D11Query;
     type RawSurface = windows::Win32::Foundation::HWND;
     type RawSwapchain = RawSwapchain;
+    type RawGraphicsPipeline = D3D11GraphicsPipeline;
+    type RawComputePipeline = D3D11ComputePipeline;
 
     fn enumerate_adapters() -> Result<Vec<AdapterInfo>, GraphicsError> {
         enumerate_adapters()
@@ -2186,6 +2235,30 @@ impl crate::backend::Backend for DirectX11 {
         desc: &DepthStencilStateDescriptor,
     ) -> Result<DepthStencilState, GraphicsError> {
         create_depth_stencil_state(device, desc)
+    }
+    fn assemble_graphics_pipeline(
+        _device: &Device,
+        desc: &crate::pipeline::GraphicsPipelineDescriptor<'_>,
+        rasterizer: RasterizerState,
+        blend: BlendState,
+        depth_stencil: DepthStencilState,
+        _color_formats: &[crate::format::Format],
+        _depth_format: Option<crate::format::Format>,
+        stencil_reference: u32,
+    ) -> Result<Self::RawGraphicsPipeline, GraphicsError> {
+        Ok(assemble_graphics_pipeline_raw(
+            desc,
+            rasterizer,
+            blend,
+            depth_stencil,
+            stencil_reference,
+        ))
+    }
+    fn assemble_compute_pipeline(
+        _device: &Device,
+        desc: &crate::pipeline::ComputePipelineDescriptor<'_>,
+    ) -> Result<Self::RawComputePipeline, GraphicsError> {
+        Ok(assemble_compute_pipeline_raw(desc))
     }
 
     fn set_render_target(context: &Context, view: &RenderTargetView) {

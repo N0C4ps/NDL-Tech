@@ -10,10 +10,18 @@ description = "Abstrações de renderização do ecossistema NDL sobre backends 
 # O backend ativo é escolhido em tempo de compilação — exatamente um
 # backend de API gráfica por build, nunca os dois ao mesmo tempo. Isso é
 # o que permite `backend::ActiveBackend` (ver `src/backend/mod.rs`)
-# resolver pra um tipo concreto sem `dyn`/vtable nenhum. Reservado:
-# "backend-directx12", "backend-vulkan", seguindo o mesmo padrão.
-default = ["backend-directx11"]
-backend-directx11 = []
+# resolver pra um tipo concreto sem `dyn`/vtable nenhum. Cada backend fica
+# na sua própria pasta (`src/backend/d3d11`, `src/backend/d3d12`) — nem
+# todo mundo tem D3D12 (ou precisa dele), então habilitar um nunca traz o
+# código do outro. Reservado: "backend-vulkan".
+default = ["backend-d3d11"]
+backend-d3d11 = []
+# D3D12: ainda cobre só o essencial (device/fila, buffers, pipeline
+# gráfico, draw/draw_indexed, MRT, swapchain) — ver o `//!` de
+# `backend::d3d12` pro que continua reservado (compute, queries, sync,
+# debug markers, draw/dispatch indireto, generate_mips, mip chains e
+# arrays de textura).
+backend-d3d12 = []
 
 [dependencies]
 # Handle de janela genérico e multiplataforma — ndl-render nunca depende de
@@ -26,6 +34,7 @@ raw-window-handle = "0.6"
 windows = { version = "0.58", features = [
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D12",
     "Win32_Graphics_Direct3D_Fxc",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
