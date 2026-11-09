@@ -35,16 +35,22 @@ desacoplada, nunca uma dependência de `ndl-render`/`ndl-physics`/etc.
 | Crate | Responsabilidade |
 |---|---|
 | `ndl-math` | Vetores, matrizes e quaternions — fundação matemática compartilhada. |
+| `ndl-platform` | Abstração sobre o SO: janelas, eventos, input, cursor, monitores. |
 | `ndl-render` | Abstrações de renderização sobre backends gráficos (wgpu). |
 | `ndl-config` | Carregamento e parsing de configurações. |
 | `ndl-dependencys` | Organização de dependências entre crates/módulos. |
 | `ndl-diagnostics` | Diagnósticos e telemetria de desenvolvimento. |
 | `ndl-logger` | Logging estruturado. |
 
+`ndl-platform` oferece a interface pública completa (janela, eventos, input,
+cursor, monitores), mas ainda só com o backend `headless` — os backends
+nativos (`windows`, `linux/x11`, `linux/wayland`, `macos`) existem na árvore
+de módulos como stubs reservados para a integração real com cada SO.
+
 Crates planejadas para rodadas futuras: `ndl-jobs`, `ndl-runtime`,
-`ndl-physics`, `ndl-audio`, `ndl-platform`, `ndl-input`, `ndl-assets`,
-`ndl-anim`, além de uma crate fachada `ndl` que reexporta as demais via
-feature flags (ex: `use ndl::render::...`).
+`ndl-physics`, `ndl-audio`, `ndl-input` (hoje parte de `ndl-platform`),
+`ndl-assets`, `ndl-anim`, além de uma crate fachada `ndl` que reexporta as
+demais via feature flags (ex: `use ndl::render::...`).
 
 ## Build
 

@@ -1,0 +1,25 @@
+/// Estado físico de uma tecla (pressionada ou liberada) em um evento de input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyState {
+    Pressed,
+    Released,
+}
+
+/// Código de tecla independente de layout (posição física no teclado).
+///
+/// Representa um subconjunto comum de teclas; o conjunto completo cresce
+/// conforme necessário — o importante é que o significado de cada variante
+/// não muda entre sistemas operacionais.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeyCode {
+    KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ,
+    KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT,
+    KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+    Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
+    ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+    Space, Enter, Escape, Tab, Backspace, Delete,
+    ShiftLeft, ShiftRight, ControlLeft, ControlRight, AltLeft, AltRight,
+    SuperLeft, SuperRight,
+    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+    Unidentified,
+}
