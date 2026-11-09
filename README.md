@@ -7,9 +7,8 @@ automações para quem está construindo um jogo por cima.
 
 Cada crate é fina e focada em uma responsabilidade. Por exemplo, `ndl-render`
 não implementa uma API gráfica própria — ela abstrai backends gráficos
-existentes (prioritariamente [wgpu](https://wgpu.rs/), com DX12 como alvo
-inicial, podendo se estender a Vulkan/Metal/GL) para aumentar a eficiência de
-desenvolvimento.
+existentes (prioritariamente Direct3D 11 nesta fase, podendo se estender a
+Vulkan/Metal/OpenGL depois) para aumentar a eficiência de desenvolvimento.
 
 ## Princípio de arquitetura: isolamento entre crates
 
@@ -36,16 +35,24 @@ desacoplada, nunca uma dependência de `ndl-render`/`ndl-physics`/etc.
 |---|---|
 | `ndl-math` | Vetores, matrizes e quaternions — fundação matemática compartilhada. |
 | `ndl-platform` | Abstração sobre o SO: janelas, eventos, input, cursor, monitores. |
-| `ndl-render` | Abstrações de renderização sobre backends gráficos (wgpu). |
+| `ndl-render` | Abstrações de renderização sobre backends gráficos (Direct3D 11, depois outros). |
 | `ndl-config` | Carregamento e parsing de configurações. |
 | `ndl-dependencys` | Organização de dependências entre crates/módulos. |
 | `ndl-diagnostics` | Diagnósticos e telemetria de desenvolvimento. |
 | `ndl-logger` | Logging estruturado. |
 
 `ndl-platform` oferece a interface pública completa (janela, eventos, input,
-cursor, monitores), mas ainda só com o backend `headless` — os backends
-nativos (`windows`, `linux/x11`, `linux/wayland`, `macos`) existem na árvore
-de módulos como stubs reservados para a integração real com cada SO.
+cursor, monitores), com os backends `headless` e `windows` (via `winit`)
+funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
+árvore de módulos como stubs reservados para a integração real com cada SO.
+
+`ndl-render` tem a árvore de módulos inteira reservada (`core`, `context`,
+`command`, `queue`, `surface`, `resource`, `memory`, `buffer`, `texture`,
+`view`, `shader`, `pipeline`, `input`, `raster`, `blend`, `depth_stencil`,
+`sampler`, `render`, `compute`, `transfer`, `query`, `sync`, `debug`,
+`format`), cada uma documentada com os tipos e métodos planejados — mas
+nenhuma delas tem implementação real ainda. O primeiro backend real
+planejado é `backend::directx` (Direct3D 11, via `windows-rs`).
 
 ## Crate fachada `ndl`
 
