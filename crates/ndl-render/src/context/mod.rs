@@ -21,12 +21,12 @@
 //! [`Context`] oferece comandos de baixo nivel; [`crate::render::RenderPass`]
 //! organiza attachments, operacoes de carga e comandos de desenho. Contextos
 //! diferidos e queries possuem APIs proprias. Permanecem reservados shaders
-//! geometry/hull/domain, multiplos alvos simultaneos, stream output e inspecao.
+//! geometry/hull/domain, stream output e inspecao.
 //!
 //! | Grupo | Métodos ainda planejados |
 //! |---|---|
 //! | Shader | `set_geometry_shader`, `set_hull_shader`, `set_domain_shader` |
-//! | Output merger | múltiplos alvos simultâneos, controle separado de depth target |
+//! | Output merger | controle separado de depth target sem recriar o bind de cor |
 //! | Stream output | `set_stream_output_targets`, `reset_stream_output_targets` |
 //! | Consultas | predication e integracao direta de queries ao contexto |
 //! | Inspecao | `get_pipeline_state`, `get_bound_resources`, `get_render_targets`, `get_viewports` |
@@ -38,14 +38,19 @@
 //! `draw_indirect` e `draw_indexed_indirect` leem os argumentos de um
 //! [`crate::buffer::Buffer`] (`BufferUsage::Indirect`) em vez de recebê-los
 //! da CPU — útil para GPU-driven rendering, ainda que o buffer indirect só
-//! seja escrito pela CPU por enquanto. Nenhum deles faz parte da lista de
-//! pendências.
+//! seja escrito pela CPU por enquanto. `set_render_targets`/
+//! `set_render_targets_with_depth` vinculam múltiplos alvos de cor
+//! simultâneos (MRT, até `DeviceLimits::max_color_attachments`) — o
+//! `BlendState` único de `set_pipeline`/`set_blend_state` já se aplica a
+//! todos eles igualmente (D3D11 sem `IndependentBlendEnable`); blend
+//! independente por alvo continua reservado. Nenhum desses métodos faz
+//! parte da lista de pendências.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "windows")]
-use windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext;
+use windows::Win32::Graphics::Direct3D11::{ID3D11DeviceContext, ID3D11RenderTargetView};
 
 use crate::buffer::Buffer;
 use crate::core::DeviceLimits;
@@ -110,10 +115,9 @@ impl Context {
     }
 
     /// Define `view` como o único alvo de renderização atual, sem depth
-    /// buffer — use [`Context::set_render_target_with_depth`] para 3D.
-    ///
-    /// Múltiplos alvos simultâneos (MRT) ainda não são suportados — isso
-    /// entra quando `view`/`texture` tiverem mais do que `RenderTargetView`.
+    /// buffer — use [`Context::set_render_target_with_depth`] para 3D, ou
+    /// [`Context::set_render_targets`] para vincular mais de um alvo de
+    /// cor simultâneo (MRT).
     pub fn set_render_target(&self, view: &RenderTargetView) {
         let _guard = self.lock_context();
         #[cfg(target_os = "windows")]
@@ -129,7 +133,8 @@ impl Context {
 
     /// Define `view` como alvo de renderização e `depth` como o depth
     /// buffer usado pelo teste/escrita de profundidade — o caminho normal
-    /// para desenhar geometria 3D.
+    /// para desenhar geometria 3D com um único alvo de cor. Use
+    /// [`Context::set_render_targets_with_depth`] para mais de um (MRT).
     pub fn set_render_target_with_depth(
         &self,
         view: &RenderTargetView,
@@ -145,6 +150,56 @@ impl Context {
         {
             let _ = (view, depth);
         }
+    }
+
+    /// Define `views` (1 a [`crate::core::DeviceLimits::max_color_attachments`])
+    /// como os alvos de renderização simultâneos atuais (MRT — ex:
+    /// deferred shading escrevendo albedo/normal/depth num só pass), sem
+    /// depth buffer — use [`Context::set_render_targets_with_depth`] para
+    /// 3D. `views[i]` corresponde ao `SV_TARGETn` de índice `i` no pixel
+    /// shader.
+    pub fn set_render_targets(
+        &self,
+        views: &[&RenderTargetView],
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        validate_render_target_count(views.len(), self.limits.max_color_attachments)?;
+        #[cfg(target_os = "windows")]
+        unsafe {
+            let raw_views: Vec<Option<ID3D11RenderTargetView>> =
+                views.iter().map(|view| Some(view.raw.clone())).collect();
+            self.raw.OMSetRenderTargets(Some(&raw_views), None);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = views;
+        }
+        Ok(())
+    }
+
+    /// Como [`Context::set_render_targets`], mas também vincula `depth`
+    /// como o depth buffer usado pelo teste/escrita de profundidade — o
+    /// caminho normal para desenhar geometria 3D com múltiplos alvos de
+    /// cor simultâneos (MRT).
+    pub fn set_render_targets_with_depth(
+        &self,
+        views: &[&RenderTargetView],
+        depth: &crate::view::DepthStencilView,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        validate_render_target_count(views.len(), self.limits.max_color_attachments)?;
+        #[cfg(target_os = "windows")]
+        unsafe {
+            let raw_views: Vec<Option<ID3D11RenderTargetView>> =
+                views.iter().map(|view| Some(view.raw.clone())).collect();
+            self.raw
+                .OMSetRenderTargets(Some(&raw_views), Some(&depth.raw));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (views, depth);
+        }
+        Ok(())
     }
 
     /// Limpa `view` (um depth buffer) com o valor de profundidade dado
@@ -798,6 +853,27 @@ impl Context {
         }
         Ok(())
     }
+}
+
+fn validate_render_target_count(
+    count: usize,
+    max_color_attachments: u32,
+) -> Result<(), crate::core::GraphicsError> {
+    if count == 0 {
+        return Err(crate::core::GraphicsError::InvalidArgument {
+            name: "render target count",
+            reason: "precisa de ao menos um alvo de renderização".into(),
+        });
+    }
+    if count as u64 > max_color_attachments as u64 {
+        return Err(crate::core::GraphicsError::OutOfBounds {
+            resource: "render target slots",
+            offset: 0,
+            size: count as u64,
+            limit: max_color_attachments as u64,
+        });
+    }
+    Ok(())
 }
 
 fn validate_viewport(

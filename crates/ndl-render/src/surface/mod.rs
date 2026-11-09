@@ -267,12 +267,7 @@ impl Swapchain {
         {
             let (width, height, format, pixels) =
                 crate::backend::directx::capture_swapchain_frame(device, &self.raw)?;
-            return Ok(FrameCapture {
-                width,
-                height,
-                format,
-                pixels,
-            });
+            return Ok(FrameCapture::new(width, height, format, pixels));
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -285,7 +280,8 @@ impl Swapchain {
 }
 
 /// Uma cópia dos pixels de um quadro, lida de volta da GPU — ver
-/// [`Swapchain::capture_frame`].
+/// [`Swapchain::capture_frame`] e [`crate::core::Device::capture_texture`]
+/// (o mesmo tipo de resultado, para qualquer textura).
 pub struct FrameCapture {
     width: u32,
     height: u32,
@@ -296,6 +292,15 @@ pub struct FrameCapture {
 }
 
 impl FrameCapture {
+    pub(crate) fn new(width: u32, height: u32, format: Format, pixels: Vec<u8>) -> Self {
+        Self {
+            width,
+            height,
+            format,
+            pixels,
+        }
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }

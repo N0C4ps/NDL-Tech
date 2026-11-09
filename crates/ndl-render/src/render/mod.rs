@@ -8,14 +8,15 @@
 //!
 //! ## Estado atual
 //!
-//! Esta primeira versão suporta um attachment de cor e, opcionalmente, um
-//! attachment de depth. As operações de carga são `Load` e `Clear`. Stores
-//! sempre preservam o conteúdo; [`RenderPass::draw_instanced`],
-//! [`RenderPass::draw_indexed_instanced`], [`RenderPass::draw_indirect`] e
-//! [`RenderPass::draw_indexed_indirect`] já são reais (ver
-//! [`crate::context::Context`] para o que cada um exige). Múltiplos
-//! attachments, scissor, bind groups e operações `DontCare`/`Discard`
-//! ainda não fazem parte da API.
+//! Suporta de um a [`crate::core::DeviceLimits::max_color_attachments`]
+//! attachments de cor simultâneos (MRT — ex: deferred shading escrevendo
+//! albedo/normal num só pass) e, opcionalmente, um attachment de depth. As
+//! operações de carga são `Load` e `Clear`. Stores sempre preservam o
+//! conteúdo; [`RenderPass::draw_instanced`], [`RenderPass::draw_indexed_instanced`],
+//! [`RenderPass::draw_indirect`] e [`RenderPass::draw_indexed_indirect`] já
+//! são reais (ver [`crate::context::Context`] para o que cada um exige).
+//! Scissor, bind groups e operações `DontCare`/`Discard` ainda não fazem
+//! parte da API.
 
 use std::ops::Range;
 
@@ -54,9 +55,15 @@ pub struct DepthAttachment<'a> {
 }
 
 /// Attachments e operações de carga para iniciar um [`RenderPass`].
+///
+/// `colors` tem um attachment por alvo de cor simultâneo — um elemento
+/// para o caso comum, vários para MRT (até
+/// [`crate::core::DeviceLimits::max_color_attachments`]). Todos os
+/// attachments (de cor e, se houver, de depth) precisam ter as mesmas
+/// dimensões.
 #[derive(Clone, Copy)]
 pub struct RenderPassDescriptor<'a> {
-    pub color: ColorAttachment<'a>,
+    pub colors: &'a [ColorAttachment<'a>],
     pub depth: Option<DepthAttachment<'a>>,
 }
 
@@ -68,24 +75,44 @@ pub struct RenderPassDescriptor<'a> {
 /// vinculado até outro comando substituí-lo.
 pub struct RenderPass<'a> {
     context: &'a Context,
-    color: &'a RenderTargetView,
+    colors: &'a [ColorAttachment<'a>],
     depth: Option<&'a DepthStencilView>,
 }
 
 impl Context {
-    /// Inicia um render pass, vincula seus attachments e aplica as operações
+    /// Inicia um render pass, vincula seus attachments (um ou vários alvos
+    /// de cor — MRT quando `desc.colors.len() > 1`) e aplica as operações
     /// de carga.
     pub fn begin_render_pass<'a>(
         &'a self,
         desc: &RenderPassDescriptor<'a>,
     ) -> Result<RenderPass<'a>, GraphicsError> {
+        let Some(first_color) = desc.colors.first() else {
+            return Err(GraphicsError::InvalidArgument {
+                name: "RenderPassDescriptor::colors",
+                reason: "precisa de ao menos um attachment de cor".into(),
+            });
+        };
+        let dimensions = first_color.view.dimensions();
+        for color in desc.colors {
+            if color.view.dimensions() != dimensions {
+                return Err(GraphicsError::IncompatibleResource {
+                    operation: "begin_render_pass",
+                    reason: format!(
+                        "todos os attachments de cor precisam ter as mesmas dimensões ({:?} != {:?})",
+                        color.view.dimensions(),
+                        dimensions
+                    ),
+                });
+            }
+        }
         if let Some(depth) = desc.depth {
-            if desc.color.view.dimensions() != depth.view.dimensions() {
+            if dimensions != depth.view.dimensions() {
                 return Err(GraphicsError::IncompatibleResource {
                     operation: "begin_render_pass",
                     reason: format!(
                         "color {:?} e depth {:?} precisam ter as mesmas dimensões",
-                        desc.color.view.dimensions(),
+                        dimensions,
                         depth.view.dimensions()
                     ),
                 });
@@ -99,13 +126,17 @@ impl Context {
             validate_depth(depth)?;
         }
 
-        self.set_render_target(desc.color.view);
+        let color_views: Vec<&RenderTargetView> = desc.colors.iter().map(|c| c.view).collect();
         if let Some(depth) = desc.depth {
-            self.set_render_target_with_depth(desc.color.view, depth.view);
+            self.set_render_targets_with_depth(&color_views, depth.view)?;
+        } else {
+            self.set_render_targets(&color_views)?;
         }
 
-        if let LoadOp::Clear(color) = desc.color.load {
-            self.clear_render_target(desc.color.view, color);
+        for color in desc.colors {
+            if let LoadOp::Clear(value) = color.load {
+                self.clear_render_target(color.view, value);
+            }
         }
         if let Some(DepthAttachment {
             view,
@@ -117,7 +148,7 @@ impl Context {
 
         Ok(RenderPass {
             context: self,
-            color: desc.color.view,
+            colors: desc.colors,
             depth: desc.depth.map(|depth| depth.view),
         })
     }
@@ -126,15 +157,29 @@ impl Context {
 impl RenderPass<'_> {
     /// Vincula o pipeline gráfico para os próximos draws.
     pub fn set_pipeline(&mut self, pipeline: &GraphicsPipeline) -> Result<(), GraphicsError> {
-        if let Some(expected) = pipeline.color_format {
-            if self.color.format() != expected {
+        if !pipeline.color_formats.is_empty() {
+            if pipeline.color_formats.len() != self.colors.len() {
                 return Err(GraphicsError::IncompatibleResource {
                     operation: "RenderPass::set_pipeline",
                     reason: format!(
-                        "pipeline espera color {expected:?}, attachment usa {:?}",
-                        self.color.format()
+                        "pipeline declara {} alvo(s) de cor, pass tem {}",
+                        pipeline.color_formats.len(),
+                        self.colors.len()
                     ),
                 });
+            }
+            for (index, (&expected, attachment)) in
+                pipeline.color_formats.iter().zip(self.colors.iter()).enumerate()
+            {
+                if attachment.view.format() != expected {
+                    return Err(GraphicsError::IncompatibleResource {
+                        operation: "RenderPass::set_pipeline",
+                        reason: format!(
+                            "alvo de cor {index}: pipeline espera {expected:?}, attachment usa {:?}",
+                            attachment.view.format()
+                        ),
+                    });
+                }
             }
         }
         match (pipeline.depth_format, self.depth) {
@@ -219,9 +264,18 @@ impl RenderPass<'_> {
         self.context.set_sampler(slot, sampler)
     }
 
-    /// Limpa novamente o attachment de cor atual.
-    pub fn clear_color_attachment(&mut self, color: [f32; 4]) {
-        self.context.clear_render_target(self.color, color);
+    /// Limpa novamente o attachment de cor de índice `index` (0 para o
+    /// caso comum de um único alvo; em MRT, o índice corresponde ao
+    /// `SV_TARGETn` do pixel shader).
+    pub fn clear_color_attachment(&mut self, index: usize, color: [f32; 4]) -> Result<(), GraphicsError> {
+        let attachment = self.colors.get(index).ok_or_else(|| GraphicsError::OutOfBounds {
+            resource: "RenderPass color attachments",
+            offset: index as u64,
+            size: 1,
+            limit: self.colors.len() as u64,
+        })?;
+        self.context.clear_render_target(attachment.view, color);
+        Ok(())
     }
 
     /// Limpa novamente o attachment de depth indicado.

@@ -52,7 +52,7 @@ adapter, surface/swapchain, buffers, shaders HLSL (vertex/pixel/compute),
 texturas/sampler, pipelines gráficos com estado fixo explícito, depth/blend, gravação diferida e fila lógica,
 cópias, queries, sincronização e debug. Isso descreve o subconjunto já
 implementado, não uma API completa: cada módulo documenta seus recursos
-disponíveis e pendências, e partes como múltiplos backends, MRT, shaders
+disponíveis e pendências, e partes como múltiplos backends, shaders
 geometry/hull/domain e operações de inspeção continuam reservadas.
 
 Desenho instanciado (`Context::draw_instanced`/`draw_indexed_instanced`,
@@ -64,6 +64,22 @@ da CPU a cada chamada) já são reais — a base para desenhar muitos objetos
 parecidos numa única chamada e para GPU-driven rendering. Por ora um buffer
 indirect só é escrito pela CPU; gravá-lo via UAV num compute shader continua
 reservado.
+
+MRT (multiple render targets) também é real: `Context::set_render_targets`/
+`set_render_targets_with_depth` vinculam de um a
+`DeviceLimits::max_color_attachments` alvos de cor simultâneos, e
+`RenderPassDescriptor::colors`/`GraphicsPipelineStateDescriptor::color_formats`
+expõem isso no nível do `RenderPass` (um elemento = caso comum, vários =
+MRT — ex: deferred shading escrevendo albedo/normal num só pass).
+`Device::create_render_target_texture` cria uma textura off-screen pronta
+para servir de attachment extra, e `Device::capture_texture` lê de volta o
+conteúdo de qualquer textura (o mesmo caminho de
+`Swapchain::capture_frame`, generalizado) — o jeito usado pelos testes para
+confirmar que cada alvo recebeu o valor certo, não só que o pass não
+quebrou. O `BlendState` único de um pipeline já se aplica a todos os alvos
+igualmente (D3D11 sem `IndependentBlendEnable`); blend independente por
+alvo continua reservado.
+
 Pipelines podem declarar formatos esperados de cor e depth; o `RenderPass`
 confere esses formatos e dimensões antes de emitir draws. O estado fixo atual
 inclui rasterização, blend (incluindo alpha separado e máscara de canais) e

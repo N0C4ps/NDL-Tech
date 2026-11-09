@@ -6,12 +6,18 @@
 //! [`crate::context::Context::copy_texture`] já são reais (cópia do
 //! recurso inteiro via `CopyResource` — os dois precisam ter a mesma
 //! descrição: tamanho para buffers, dimensões/formato para texturas).
-//! Cópias parciais (`copy_buffer_region`, `copy_texture_region`,
-//! `copy_subresource_region`), resolução de MSAA (`resolve_texture`) e
-//! geração de mipmaps (`generate_mips`) continuam reservadas.
+//! [`Device::capture_texture`] lê de volta os pixels de qualquer textura
+//! (mesmo caminho usado por `Swapchain::capture_frame`, generalizado) —
+//! útil para validar um attachment de cor extra de MRT sem precisar
+//! apresentá-lo numa swapchain. Cópias parciais (`copy_buffer_region`,
+//! `copy_texture_region`, `copy_subresource_region`), resolução de MSAA
+//! (`resolve_texture`) e geração de mipmaps (`generate_mips`) continuam
+//! reservadas.
 
 use crate::buffer::Buffer;
 use crate::context::Context;
+use crate::core::{Device, GraphicsError};
+use crate::surface::FrameCapture;
 use crate::texture::Texture2D;
 
 impl Context {
@@ -38,6 +44,31 @@ impl Context {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (src, dst);
+        }
+    }
+}
+
+impl Device {
+    /// Lê de volta o conteúdo atual de `texture`, como pixels crus — o
+    /// mesmo caminho de [`crate::surface::Swapchain::capture_frame`], mas
+    /// para qualquer textura (ex: um attachment de cor extra de MRT, ou um
+    /// alvo de post-processing), não só o back buffer de uma swapchain.
+    /// Para ler um attachment que a GPU acabou de escrever, chame depois
+    /// do [`crate::render::RenderPass`] que o preencheu ter terminado
+    /// (`RenderPass::end`).
+    pub fn capture_texture(&self, texture: &Texture2D) -> Result<FrameCapture, GraphicsError> {
+        #[cfg(target_os = "windows")]
+        {
+            let (width, height, format, pixels) =
+                crate::backend::directx::capture_texture(self, texture)?;
+            return Ok(FrameCapture::new(width, height, format, pixels));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = texture;
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
         }
     }
 }

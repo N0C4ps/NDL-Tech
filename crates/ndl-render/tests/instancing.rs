@@ -198,7 +198,7 @@ fn draws_three_instanced_quads_with_one_draw_call() {
                 rasterizer: Default::default(),
                 blend: BlendStateDescriptor::opaque(),
                 depth_stencil: DepthStencilStateDescriptor::disabled(),
-                color_format: Format::Bgra8Unorm,
+                color_formats: &[Format::Bgra8Unorm],
                 depth_format: None,
                 stencil_reference: 0,
             },
@@ -279,10 +279,10 @@ fn draws_three_instanced_quads_with_one_draw_call() {
                 .render_target_view(&device)
                 .expect("falha ao obter a render target view");
             let pass_desc = RenderPassDescriptor {
-                color: ColorAttachment {
+                colors: &[ColorAttachment {
                     view,
                     load: LoadOp::Clear(background),
-                },
+                }],
                 depth: None,
             };
             let mut pass = context

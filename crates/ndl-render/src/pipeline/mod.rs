@@ -8,10 +8,11 @@
 //!
 //! [`GraphicsPipeline`] agrupa shaders, input layout, topologia e estados
 //! explícitos de rasterizer/blend/depth-stencil. A variante configurada
-//! declara também formatos esperados dos attachments, verificados ao
-//! vincular o pipeline a um [`crate::render::RenderPass`]. MRT, formatos de
-//! attachment múltiplos e MSAA ainda não fazem parte do contrato.
-//! [`ComputePipeline`] também já é real.
+//! declara também os formatos esperados dos attachments — um ou vários,
+//! via `GraphicsPipelineStateDescriptor::color_formats` — verificados ao
+//! vincular o pipeline a um [`crate::render::RenderPass`] com o mesmo
+//! número de alvos de cor, na mesma ordem (MRT). MSAA ainda não faz parte
+//! do contrato. [`ComputePipeline`] também já é real.
 
 use crate::blend::BlendStateDescriptor;
 use crate::core::{Device, GraphicsError};
@@ -46,17 +47,25 @@ pub struct GraphicsPipeline {
     #[cfg(target_os = "windows")]
     pub(crate) depth_stencil_state: windows::Win32::Graphics::Direct3D11::ID3D11DepthStencilState,
     pub(crate) stencil_reference: u32,
-    pub(crate) color_format: Option<Format>,
+    /// Vazio = nenhum formato declarado (caminho de
+    /// [`Device::create_graphics_pipeline`], sem checagem de attachment).
+    /// Não vazio = um formato por alvo de cor, na ordem vinculada por
+    /// [`crate::render::RenderPass`] — `len() > 1` é MRT.
+    pub(crate) color_formats: Vec<Format>,
     pub(crate) depth_format: Option<Format>,
 }
 
 /// Estados fixos e formatos dos attachments esperados pelo pipeline.
+///
+/// `color_formats` tem um formato por alvo de cor simultâneo — `&[fmt]`
+/// para um único attachment, `&[fmt0, fmt1, ...]` para MRT (até
+/// [`crate::core::DeviceLimits::max_color_attachments`]).
 #[derive(Debug, Clone, Copy)]
-pub struct GraphicsPipelineStateDescriptor {
+pub struct GraphicsPipelineStateDescriptor<'a> {
     pub rasterizer: RasterizerStateDescriptor,
     pub blend: BlendStateDescriptor,
     pub depth_stencil: DepthStencilStateDescriptor,
-    pub color_format: Format,
+    pub color_formats: &'a [Format],
     pub depth_format: Option<Format>,
     pub stencil_reference: u8,
 }
@@ -80,7 +89,7 @@ impl Device {
                 rasterizer_state: rasterizer.raw,
                 blend_state: blend.raw,
                 depth_stencil_state: depth_stencil.raw,
-                color_format: None,
+                color_formats: Vec::new(),
                 depth_format: None,
                 stencil_reference: 0,
             });
@@ -98,18 +107,35 @@ impl Device {
     pub fn create_graphics_pipeline_with_state(
         &self,
         desc: &GraphicsPipelineDescriptor<'_>,
-        state: &GraphicsPipelineStateDescriptor,
+        state: &GraphicsPipelineStateDescriptor<'_>,
     ) -> Result<GraphicsPipeline, GraphicsError> {
-        if state.color_format.is_depth() || state.color_format.is_compressed() {
+        if state.color_formats.is_empty() {
             return Err(GraphicsError::InvalidArgument {
-                name: "color_format",
-                reason: "o formato precisa ser colorido e não comprimido".into(),
+                name: "color_formats",
+                reason: "precisa declarar ao menos um formato de alvo de cor".into(),
             });
         }
-        if !self.format_features(state.color_format)?.render_target {
-            return Err(GraphicsError::FeatureNotSupported {
-                feature: format!("color attachment no formato {:?}", state.color_format),
+        let max_color_attachments = self.limits().max_color_attachments as usize;
+        if state.color_formats.len() > max_color_attachments {
+            return Err(GraphicsError::OutOfBounds {
+                resource: "pipeline color_formats",
+                offset: 0,
+                size: state.color_formats.len() as u64,
+                limit: max_color_attachments as u64,
             });
+        }
+        for color_format in state.color_formats {
+            if color_format.is_depth() || color_format.is_compressed() {
+                return Err(GraphicsError::InvalidArgument {
+                    name: "color_formats",
+                    reason: "cada formato precisa ser colorido e não comprimido".into(),
+                });
+            }
+            if !self.format_features(*color_format)?.render_target {
+                return Err(GraphicsError::FeatureNotSupported {
+                    feature: format!("color attachment no formato {color_format:?}"),
+                });
+            }
         }
         if let Some(format) = state.depth_format {
             if !format.is_depth() {
@@ -155,7 +181,7 @@ impl Device {
                 rasterizer_state: rasterizer.raw,
                 blend_state: blend.raw,
                 depth_stencil_state: depth_stencil.raw,
-                color_format: Some(state.color_format),
+                color_formats: state.color_formats.to_vec(),
                 depth_format: state.depth_format,
                 stencil_reference: state.stencil_reference as u32,
             })

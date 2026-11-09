@@ -171,7 +171,7 @@ fn draws_a_colored_triangle() {
         rasterizer: Default::default(),
         blend: BlendStateDescriptor::opaque(),
         depth_stencil: DepthStencilStateDescriptor::disabled(),
-        color_format: Format::Bgra8Unorm,
+        color_formats: &[Format::Bgra8Unorm],
         depth_format: None,
         stencil_reference: 0,
     };
@@ -207,7 +207,7 @@ fn draws_a_colored_triangle() {
         .create_graphics_pipeline_with_state(
             &pipeline_desc,
             &GraphicsPipelineStateDescriptor {
-                color_format: Format::Rgba8Unorm,
+                color_formats: &[Format::Rgba8Unorm],
                 ..pipeline_state
             },
         )
@@ -258,10 +258,10 @@ fn draws_a_colored_triangle() {
                 .render_target_view(&device)
                 .expect("falha ao obter a render target view");
             let pass_desc = RenderPassDescriptor {
-                color: ColorAttachment {
+                colors: &[ColorAttachment {
                     view,
                     load: LoadOp::Clear(background),
-                },
+                }],
                 depth: None,
             };
             let mut pass = context

@@ -14,7 +14,8 @@ use windows::Win32::Graphics::Direct3D::{
 };
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_DEPTH_STENCIL, D3D11_BIND_FLAG, D3D11_BIND_INDEX_BUFFER,
-    D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS, D3D11_BIND_VERTEX_BUFFER,
+    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS,
+    D3D11_BIND_VERTEX_BUFFER,
     D3D11_BUFFER_DESC, D3D11_COMPARISON_ALWAYS, D3D11_COMPARISON_EQUAL, D3D11_COMPARISON_FUNC,
     D3D11_COMPARISON_GREATER, D3D11_COMPARISON_GREATER_EQUAL, D3D11_COMPARISON_LESS,
     D3D11_COMPARISON_LESS_EQUAL, D3D11_COMPARISON_NEVER, D3D11_COMPARISON_NOT_EQUAL,
@@ -1224,6 +1225,71 @@ pub(crate) fn create_texture_2d(
     ))
 }
 
+pub(crate) fn create_render_target_texture(
+    device: &Device,
+    desc: &crate::texture::TextureDescriptor,
+) -> Result<(crate::texture::Texture2D, crate::view::RenderTargetView), GraphicsError> {
+    let format = desc
+        .format
+        .to_dxgi_format()
+        .ok_or(GraphicsError::Unsupported(
+            "formato não suportado para textura",
+        ))?;
+
+    let texture_desc = D3D11_TEXTURE2D_DESC {
+        Width: desc.width,
+        Height: desc.height,
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: format,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: D3D11_USAGE_DEFAULT,
+        // Também SHADER_RESOURCE: um alvo de renderização em geral precisa
+        // ser lido depois (post-processing, deferred shading), não só
+        // escrito — ver create_shader_resource_view.
+        BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
+        CPUAccessFlags: 0,
+        MiscFlags: 0,
+    };
+
+    let mut texture: Option<ID3D11Texture2D> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateTexture2D(&texture_desc, None, Some(&mut texture))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let texture = texture
+        .ok_or_else(|| GraphicsError::Backend("CreateTexture2D não retornou uma textura".into()))?;
+
+    let mut render_target_view: Option<ID3D11RenderTargetView> = None;
+    unsafe {
+        device.raw.device.CreateRenderTargetView(
+            &texture,
+            None,
+            Some(&mut render_target_view),
+        )
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let render_target_view = render_target_view.ok_or_else(|| {
+        GraphicsError::Backend("CreateRenderTargetView não retornou uma view".into())
+    })?;
+
+    Ok((
+        crate::texture::Texture2D::from_raw(texture.clone(), desc.width, desc.height, desc.format),
+        crate::view::RenderTargetView::from_raw(
+            render_target_view,
+            desc.format,
+            desc.width,
+            desc.height,
+        ),
+    ))
+}
+
 pub(crate) fn create_shader_resource_view(
     device: &Device,
     texture: &crate::texture::Texture2D,
@@ -1420,14 +1486,32 @@ pub(crate) fn capture_swapchain_frame(
     device: &Device,
     raw: &RawSwapchain,
 ) -> Result<(u32, u32, crate::format::Format, Vec<u8>), GraphicsError> {
-    use windows::Win32::Graphics::Direct3D11::D3D11_MAP_READ;
-
     let back_buffer: ID3D11Texture2D = unsafe { raw.swapchain.GetBuffer(0) }
         .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    capture_texture_2d_raw(device, &back_buffer)
+}
+
+/// Lê de volta o conteúdo atual de `texture`, como pixels crus e
+/// compactados — o mesmo caminho de `capture_swapchain_frame`, mas para
+/// qualquer textura (ex: um attachment de cor extra de MRT), não só o
+/// back buffer de uma swapchain. Ver
+/// `crate::core::Device::capture_texture`.
+pub(crate) fn capture_texture(
+    device: &Device,
+    texture: &crate::texture::Texture2D,
+) -> Result<(u32, u32, crate::format::Format, Vec<u8>), GraphicsError> {
+    capture_texture_2d_raw(device, &texture.raw)
+}
+
+fn capture_texture_2d_raw(
+    device: &Device,
+    source: &ID3D11Texture2D,
+) -> Result<(u32, u32, crate::format::Format, Vec<u8>), GraphicsError> {
+    use windows::Win32::Graphics::Direct3D11::D3D11_MAP_READ;
 
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     unsafe {
-        back_buffer.GetDesc(&mut desc);
+        source.GetDesc(&mut desc);
     }
 
     let staging_desc = D3D11_TEXTURE2D_DESC {
@@ -1458,11 +1542,11 @@ pub(crate) fn capture_swapchain_frame(
     })?;
 
     unsafe {
-        device.raw.context.CopyResource(&staging, &back_buffer);
+        device.raw.context.CopyResource(&staging, source);
     }
 
     let format = crate::format::Format::from_dxgi_format(desc.Format).ok_or(
-        GraphicsError::Unsupported("formato do back buffer sem mapeamento conhecido"),
+        GraphicsError::Unsupported("formato da textura sem mapeamento conhecido"),
     )?;
     let bytes_per_pixel = format.bits_per_pixel() / 8;
 

@@ -6,14 +6,20 @@
 //!
 //! ## Estado atual
 //!
-//! [`Texture2D`] já é real, com upload de dados na criação. `Texture1D`,
-//! `Texture3D`, `TextureCube` e arrays continuam reservados, assim como
-//! mipmaps, MSAA e as operações de atualização/cópia depois da criação
-//! (`write_texture`, `generate_mipmaps`, `resolve_texture`, ...).
+//! [`Texture2D`] já é real, com upload de dados na criação via
+//! [`Device::create_texture_2d`]. [`Device::create_render_target_texture`]
+//! cria uma textura sem dados iniciais já pronta para ser usada como alvo
+//! de cor (ex: um dos N attachments de um [`crate::render::RenderPass`]
+//! com MRT) e, depois, lida como [`ShaderResourceView`] — o mesmo
+//! raciocínio de [`crate::core::Device::create_depth_texture`]: o
+//! conteúdo é escrito pela GPU durante o desenho, não enviado pela CPU.
+//! `Texture1D`, `Texture3D`, `TextureCube` e arrays continuam reservados,
+//! assim como mipmaps, MSAA e as operações de atualização/cópia depois da
+//! criação (`write_texture`, `generate_mipmaps`, `resolve_texture`, ...).
 
 use crate::core::{Device, GraphicsError};
 use crate::format::Format;
-use crate::view::ShaderResourceView;
+use crate::view::{RenderTargetView, ShaderResourceView};
 
 /// Configuração usada para criar uma [`Texture2D`].
 #[derive(Debug, Clone, Copy)]
@@ -129,6 +135,61 @@ impl Device {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (desc, data);
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+
+    /// Cria uma textura 2D sem dados iniciais, já com uma
+    /// [`RenderTargetView`] pronta — para usar como alvo de desenho (ex:
+    /// um attachment de cor extra num [`crate::render::RenderPass`] com
+    /// MRT, ou um alvo intermediário de post-processing), e depois,
+    /// opcionalmente, ler via [`Device::create_shader_resource_view`].
+    pub fn create_render_target_texture(
+        &self,
+        desc: &TextureDescriptor,
+    ) -> Result<(Texture2D, RenderTargetView), GraphicsError> {
+        if desc.width == 0 || desc.height == 0 {
+            return Err(GraphicsError::InvalidArgument {
+                name: "TextureDescriptor::extent",
+                reason: "largura e altura precisam ser maiores que zero".into(),
+            });
+        }
+        let limits = self.limits();
+        if desc.width > limits.max_texture_dimension_2d
+            || desc.height > limits.max_texture_dimension_2d
+        {
+            return Err(GraphicsError::InvalidArgument {
+                name: "TextureDescriptor::extent",
+                reason: format!(
+                    "{}x{} excede o limite 2D {}x{}",
+                    desc.width,
+                    desc.height,
+                    limits.max_texture_dimension_2d,
+                    limits.max_texture_dimension_2d
+                ),
+            });
+        }
+        if desc.format.is_depth() || desc.format.is_compressed() {
+            return Err(GraphicsError::InvalidArgument {
+                name: "TextureDescriptor::format",
+                reason: "um alvo de renderização precisa de um formato colorido e não comprimido"
+                    .into(),
+            });
+        }
+        if !self.format_features(desc.format)?.render_target {
+            return Err(GraphicsError::FeatureNotSupported {
+                feature: format!("render target no formato {:?}", desc.format),
+            });
+        }
+        #[cfg(target_os = "windows")]
+        {
+            return crate::backend::directx::create_render_target_texture(self, desc);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = desc;
             Err(GraphicsError::Unsupported(
                 "nenhum backend gráfico implementado para este SO ainda",
             ))

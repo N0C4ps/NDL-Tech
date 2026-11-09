@@ -180,7 +180,7 @@ fn draws_a_triangle_via_draw_indirect() {
                 rasterizer: Default::default(),
                 blend: BlendStateDescriptor::opaque(),
                 depth_stencil: DepthStencilStateDescriptor::disabled(),
-                color_format: Format::Bgra8Unorm,
+                color_formats: &[Format::Bgra8Unorm],
                 depth_format: None,
                 stencil_reference: 0,
             },
@@ -245,12 +245,13 @@ fn draws_a_triangle_via_draw_indirect() {
             let view = swapchain
                 .render_target_view(&device)
                 .expect("falha ao obter a render target view");
+            let colors = [ColorAttachment {
+                view,
+                load: LoadOp::Clear(background),
+            }];
             let mut pass = context
                 .begin_render_pass(&RenderPassDescriptor {
-                    color: ColorAttachment {
-                        view,
-                        load: LoadOp::Clear(background),
-                    },
+                    colors: &colors,
                     depth: None,
                 })
                 .expect("falha ao iniciar render pass");
@@ -345,7 +346,7 @@ fn draws_a_quad_via_draw_indexed_indirect() {
                 rasterizer: Default::default(),
                 blend: BlendStateDescriptor::opaque(),
                 depth_stencil: DepthStencilStateDescriptor::disabled(),
-                color_format: Format::Bgra8Unorm,
+                color_formats: &[Format::Bgra8Unorm],
                 depth_format: None,
                 stencil_reference: 0,
             },
@@ -426,12 +427,13 @@ fn draws_a_quad_via_draw_indexed_indirect() {
             let view = swapchain
                 .render_target_view(&device)
                 .expect("falha ao obter a render target view");
+            let colors = [ColorAttachment {
+                view,
+                load: LoadOp::Clear(background),
+            }];
             let mut pass = context
                 .begin_render_pass(&RenderPassDescriptor {
-                    color: ColorAttachment {
-                        view,
-                        load: LoadOp::Clear(background),
-                    },
+                    colors: &colors,
                     depth: None,
                 })
                 .expect("falha ao iniciar render pass");

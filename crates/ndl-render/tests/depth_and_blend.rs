@@ -179,7 +179,7 @@ fn depth_test_and_blend_with_indexed_draws() {
                 rasterizer: Default::default(),
                 blend: BlendStateDescriptor::opaque(),
                 depth_stencil: DepthStencilStateDescriptor::depth_read_write(),
-                color_format: Format::Bgra8Unorm,
+                color_formats: &[Format::Bgra8Unorm],
                 depth_format: Some(Format::D32Float),
                 stencil_reference: 0,
             },
