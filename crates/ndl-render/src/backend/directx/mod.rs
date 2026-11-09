@@ -13,9 +13,9 @@ use windows::Win32::Graphics::Direct3D::{
 use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Buffer, ID3D11Device, ID3D11DepthStencilState,
-    ID3D11DepthStencilView, ID3D11DeviceContext, ID3D11InputLayout,
-    ID3D11PixelShader, ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView,
+    D3D11CreateDevice, ID3D11Buffer, ID3D11CommandList, ID3D11Device, ID3D11DepthStencilState,
+    ID3D11DepthStencilView, ID3D11DeviceContext, ID3D11InputLayout, ID3D11PixelShader,
+    ID3D11Query, ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView,
     ID3D11Texture2D, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_DEPTH_STENCIL,
     D3D11_BIND_FLAG, D3D11_BIND_INDEX_BUFFER, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_VERTEX_BUFFER,
     D3D11_BUFFER_DESC, D3D11_COMPARISON_ALWAYS, D3D11_COMPARISON_EQUAL, D3D11_COMPARISON_FUNC,
@@ -24,10 +24,10 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_DEBUG,
     D3D11_CREATE_DEVICE_FLAG, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_WRITE_MASK_ALL,
     D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT,
-    D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_SAMPLER_DESC, D3D11_SDK_VERSION,
-    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_TEXTURE_ADDRESS_CLAMP,
-    D3D11_TEXTURE_ADDRESS_MIRROR, D3D11_TEXTURE_ADDRESS_WRAP, D3D11_USAGE_DEFAULT,
-    D3D11_USAGE_DYNAMIC,
+    D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
+    D3D11_SAMPLER_DESC, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
+    D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_MIRROR, D3D11_TEXTURE_ADDRESS_WRAP,
+    D3D11_USAGE_DEFAULT, D3D11_USAGE_DYNAMIC,
 };
 use windows::core::PCSTR;
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -354,6 +354,82 @@ pub(crate) fn create_input_layout(
     })?;
 
     Ok(crate::input::InputLayout { raw: layout })
+}
+
+pub(crate) fn create_command_encoder(
+    device: &Device,
+) -> Result<crate::command::CommandEncoder, GraphicsError> {
+    let mut deferred: Option<ID3D11DeviceContext> = None;
+    unsafe { device.raw.device.CreateDeferredContext(0, Some(&mut deferred)) }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let deferred = deferred.ok_or_else(|| {
+        GraphicsError::Backend("CreateDeferredContext não retornou um contexto".into())
+    })?;
+
+    Ok(crate::command::CommandEncoder::from_context(
+        crate::context::Context::from_raw(deferred),
+    ))
+}
+
+pub(crate) fn finish_command_list(
+    context: &crate::context::Context,
+) -> Result<crate::command::CommandBuffer, GraphicsError> {
+    let mut command_list: Option<ID3D11CommandList> = None;
+    unsafe { context.raw.FinishCommandList(false, Some(&mut command_list)) }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let command_list = command_list.ok_or_else(|| {
+        GraphicsError::Backend("FinishCommandList não retornou uma lista de comandos".into())
+    })?;
+
+    Ok(crate::command::CommandBuffer::from_raw(command_list))
+}
+
+pub(crate) fn execute_command_list(
+    context: &crate::context::Context,
+    buffer: &crate::command::CommandBuffer,
+) {
+    unsafe {
+        context.raw.ExecuteCommandList(&buffer.raw, false);
+    }
+}
+
+pub(crate) fn wait_idle(context: &crate::context::Context) -> Result<(), GraphicsError> {
+    let device: ID3D11Device = unsafe { context.raw.GetDevice() }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let query_desc = D3D11_QUERY_DESC {
+        Query: D3D11_QUERY_EVENT,
+        MiscFlags: 0,
+    };
+    let mut query: Option<ID3D11Query> = None;
+    unsafe { device.CreateQuery(&query_desc, Some(&mut query)) }
+        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let query = query.ok_or_else(|| GraphicsError::Backend("CreateQuery falhou".into()))?;
+
+    unsafe {
+        context.raw.End(&query);
+    }
+
+    // `result` começa zerado (FALSE) e GetData só escreve TRUE quando a
+    // GPU realmente terminou — enquanto a query não estiver pronta,
+    // GetData retorna S_FALSE sem tocar no buffer, então o polling padrão
+    // é checar o valor em si, não só se a chamada "deu erro".
+    let mut result = windows::Win32::Foundation::BOOL(0);
+    while !result.as_bool() {
+        let _ = unsafe {
+            context.raw.GetData(
+                &query,
+                Some(&mut result as *mut _ as *mut _),
+                std::mem::size_of_val(&result) as u32,
+                0,
+            )
+        };
+        std::thread::yield_now();
+    }
+
+    Ok(())
 }
 
 fn blend_factor_to_d3d(

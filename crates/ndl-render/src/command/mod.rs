@@ -1,33 +1,98 @@
 //! Gravação e execução de comandos.
 //!
-//! Decisão arquitetural: oferecer um `CommandEncoder` no estilo de APIs
-//! modernas (que grava passes e comandos) por cima do modelo real do
-//! backend (contextos imediato/diferido no D3D11), em vez de expor filas
-//! de comando explícitas que o D3D11 não tem nativamente.
+//! No D3D11, um contexto diferido é a mesma interface `ID3D11DeviceContext`
+//! do contexto imediato — só que criado via `CreateDeferredContext` em vez
+//! de ser o contexto principal do device, e seus comandos não executam na
+//! GPU até serem passados para o contexto imediato via
+//! `ExecuteCommandList`. Isso permite gravar comandos em outra thread
+//! (ex: culling/batching de uma cena grande) enquanto a thread principal
+//! segue desenhando.
 //!
-//! ## Planejado
+//! ## Estado atual
 //!
-//! ```ignore
-//! impl CommandEncoder {
-//!     fn begin_render_pass(&mut self, desc: &RenderPassDescriptor) -> RenderPass<'_>;
-//!     fn begin_compute_pass(&mut self) -> ComputePass<'_>;
+//! [`CommandEncoder`] já é real: ele é um [`crate::context::Context`] por
+//! baixo (os dois compartilham a mesma interface nativa), então todos os
+//! métodos de desenho/bind de `Context` (`set_pipeline`, `draw`,
+//! `set_vertex_buffer`, ...) já funcionam nele via `Deref` — a única
+//! coisa exclusiva de `CommandEncoder` é [`CommandEncoder::finish`].
+//! [`CommandBuffer`] também já é real.
 //!
-//!     fn copy_buffer(&mut self, src: &Buffer, dst: &Buffer);
-//!     fn copy_texture(&mut self, src: &Texture, dst: &Texture);
-//!     fn clear_texture(&mut self, texture: &Texture, color: Color);
-//!
-//!     fn begin_debug_group(&mut self, label: &str);
-//!     fn end_debug_group(&mut self);
-//!     fn insert_debug_marker(&mut self, label: &str);
-//!
-//!     fn finish(self) -> Result<CommandBuffer>;
-//! }
-//! ```
-//!
-//! Outras operações consideradas: `reset()`, `execute()`,
-//! `execute_command_list()`, `finish_command_list()`,
-//! `restore_context_state()`, `discard_recording()`, `command_count()`.
-//! Nem todas precisam ser públicas — `reset()`/`discard_recording()` só
-//! fazem sentido se o encoder permitir reuso/cancelamento.
-//!
-//! Ainda não implementado.
+//! Operações mais específicas de gravação (`reset()`, `discard_recording()`,
+//! `command_count()`, debug groups/markers) continuam reservadas.
+
+use std::ops::Deref;
+
+use crate::context::Context;
+use crate::core::{Device, GraphicsError};
+
+/// Grava comandos de desenho/bind num contexto diferido, sem executá-los
+/// na GPU imediatamente — ver [`CommandEncoder::finish`].
+///
+/// Todos os métodos de [`Context`] (`set_pipeline`, `draw`,
+/// `set_vertex_buffer`, `clear_render_target`, ...) estão disponíveis
+/// aqui via `Deref`, porque gravar comandos é exatamente a mesma API de
+/// emitir comandos — a diferença é só quando eles de fato rodam na GPU.
+pub struct CommandEncoder {
+    context: Context,
+}
+
+impl CommandEncoder {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn from_context(context: Context) -> Self {
+        Self { context }
+    }
+
+    /// Encerra a gravação e produz um [`CommandBuffer`], pronto para ser
+    /// submetido numa [`crate::queue::GraphicsQueue`]. Nenhum comando
+    /// gravado roda na GPU antes disso.
+    pub fn finish(self) -> Result<CommandBuffer, GraphicsError> {
+        #[cfg(target_os = "windows")]
+        {
+            crate::backend::directx::finish_command_list(&self.context)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+}
+
+impl Deref for CommandEncoder {
+    type Target = Context;
+
+    fn deref(&self) -> &Context {
+        &self.context
+    }
+}
+
+/// Uma lista de comandos já gravada e pronta para execução — ver
+/// [`crate::queue::GraphicsQueue::submit`].
+pub struct CommandBuffer {
+    #[cfg(target_os = "windows")]
+    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11CommandList,
+}
+
+impl CommandBuffer {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn from_raw(raw: windows::Win32::Graphics::Direct3D11::ID3D11CommandList) -> Self {
+        Self { raw }
+    }
+}
+
+impl Device {
+    /// Cria um novo [`CommandEncoder`] com um contexto diferido próprio.
+    pub fn create_command_encoder(&self) -> Result<CommandEncoder, GraphicsError> {
+        #[cfg(target_os = "windows")]
+        {
+            crate::backend::directx::create_command_encoder(self)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+}
