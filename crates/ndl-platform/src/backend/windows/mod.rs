@@ -86,8 +86,7 @@ impl Backend for WindowsBackend {
         descriptor: WindowDescriptor,
         on_event: Box<dyn FnMut(Event<()>, &NativeWindowHandle)>,
     ) -> Result<(), PlatformError> {
-        let event_loop =
-            EventLoop::new().map_err(|err| PlatformError::Backend(err.to_string()))?;
+        let event_loop = EventLoop::new().map_err(|err| PlatformError::Backend(err.to_string()))?;
 
         let mut app = App {
             descriptor,
@@ -211,7 +210,10 @@ impl ApplicationHandler for App {
         // winit já entrega, junto da tecla, o texto que ela produz
         // (considerando layout de teclado); repassamos isso como um
         // `TextInput` separado, além do `KeyboardInput` em si.
-        if let WinitWindowEvent::KeyboardInput { event: key_event, .. } = &event {
+        if let WinitWindowEvent::KeyboardInput {
+            event: key_event, ..
+        } = &event
+        {
             if key_event.state == ElementState::Pressed {
                 if let Some(text) = &key_event.text {
                     self.emit(WindowEvent::TextInput {
@@ -237,9 +239,10 @@ impl App {
     fn map_window_event(&self, event: WinitWindowEvent) -> Option<WindowEvent> {
         match event {
             WinitWindowEvent::CloseRequested => Some(WindowEvent::CloseRequested),
-            WinitWindowEvent::Resized(size) => {
-                Some(WindowEvent::Resized(LogicalSize::new(size.width, size.height)))
-            }
+            WinitWindowEvent::Resized(size) => Some(WindowEvent::Resized(LogicalSize::new(
+                size.width,
+                size.height,
+            ))),
             WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 Some(WindowEvent::ScaleFactorChanged { scale_factor })
             }
@@ -286,13 +289,16 @@ impl App {
             WinitWindowEvent::HoveredFile(path) => Some(WindowEvent::FileHovered { path }),
             WinitWindowEvent::HoveredFileCancelled => Some(WindowEvent::FileHoverCancelled),
 
-            WinitWindowEvent::Touch(WinitTouch { id, phase, location, .. }) => {
-                Some(WindowEvent::Touch {
-                    id,
-                    phase: map_touch_phase(phase),
-                    position: (location.x, location.y),
-                })
-            }
+            WinitWindowEvent::Touch(WinitTouch {
+                id,
+                phase,
+                location,
+                ..
+            }) => Some(WindowEvent::Touch {
+                id,
+                phase: map_touch_phase(phase),
+                position: (location.x, location.y),
+            }),
 
             _ => None,
         }

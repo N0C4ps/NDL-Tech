@@ -1,6 +1,6 @@
 /// Informações descritivas de um adaptador gráfico (GPU) disponível no
-/// sistema, obtidas via enumeração de adaptadores do backend (DXGI, no
-/// caso do Direct3D).
+/// sistema. Os dados preenchidos dependem do que o backend e o driver
+/// conseguem consultar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdapterInfo {
     pub name: String,
@@ -9,4 +9,15 @@ pub struct AdapterInfo {
     pub dedicated_video_memory: u64,
     pub shared_system_memory: u64,
     pub is_software: bool,
+    pub device_type: AdapterType,
+    /// Versão do driver, quando fornecida pelo backend/driver ativo.
+    pub driver_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdapterType {
+    Hardware,
+    Software,
+    Cpu,
+    Unknown,
 }

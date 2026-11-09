@@ -8,21 +8,24 @@
 use std::num::NonZeroIsize;
 
 use raw_window_handle::{RawWindowHandle, Win32WindowHandle};
-use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    MSG, PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassW,
+    TranslateMessage, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
+use windows::core::w;
 
+use ndl_render::blend::BlendStateDescriptor;
 use ndl_render::buffer::{BufferDescriptor, BufferUsage};
 use ndl_render::core::{Device, DeviceDescriptor};
+use ndl_render::depth_stencil::DepthStencilStateDescriptor;
 use ndl_render::format::Format;
 use ndl_render::input::{PrimitiveTopology, VertexAttribute};
-use ndl_render::pipeline::GraphicsPipelineDescriptor;
+use ndl_render::pipeline::{GraphicsPipelineDescriptor, GraphicsPipelineStateDescriptor};
 use ndl_render::raster::Viewport;
+use ndl_render::render::{ColorAttachment, LoadOp, RenderPassDescriptor};
 use ndl_render::shader::compile_hlsl;
 use ndl_render::surface::{Extent2D, Surface, Swapchain, SwapchainDescriptor};
 
@@ -154,14 +157,57 @@ fn draws_a_colored_triangle() {
         .expect("falha ao criar input layout");
 
     // --- pipeline ---
+    let pipeline_desc = GraphicsPipelineDescriptor {
+        vertex_shader: &vertex_shader,
+        pixel_shader: &pixel_shader,
+        input_layout: &input_layout,
+        primitive_topology: PrimitiveTopology::TriangleList,
+    };
+    let pipeline_state = GraphicsPipelineStateDescriptor {
+        rasterizer: Default::default(),
+        blend: BlendStateDescriptor::opaque(),
+        depth_stencil: DepthStencilStateDescriptor::disabled(),
+        color_format: Format::Bgra8Unorm,
+        depth_format: None,
+        stencil_reference: 0,
+    };
     let pipeline = device
-        .create_graphics_pipeline(&GraphicsPipelineDescriptor {
-            vertex_shader: &vertex_shader,
-            pixel_shader: &pixel_shader,
-            input_layout: &input_layout,
-            primitive_topology: PrimitiveTopology::TriangleList,
-        })
-        .expect("falha ao criar pipeline");
+        .create_graphics_pipeline_with_state(&pipeline_desc, &pipeline_state)
+        .expect("falha ao criar pipeline com estados explícitos");
+    assert!(
+        device
+            .create_graphics_pipeline_with_state(
+                &pipeline_desc,
+                &GraphicsPipelineStateDescriptor {
+                    depth_stencil: DepthStencilStateDescriptor::depth_read_write(),
+                    ..pipeline_state
+                },
+            )
+            .is_err()
+    );
+    let mut stencil_state = DepthStencilStateDescriptor::depth_read_write();
+    stencil_state.stencil_test_enabled = true;
+    assert!(
+        device
+            .create_graphics_pipeline_with_state(
+                &pipeline_desc,
+                &GraphicsPipelineStateDescriptor {
+                    depth_stencil: stencil_state,
+                    depth_format: Some(Format::D32Float),
+                    ..pipeline_state
+                },
+            )
+            .is_err()
+    );
+    let incompatible_pipeline = device
+        .create_graphics_pipeline_with_state(
+            &pipeline_desc,
+            &GraphicsPipelineStateDescriptor {
+                color_format: Format::Rgba8Unorm,
+                ..pipeline_state
+            },
+        )
+        .expect("falha ao criar pipeline para teste de incompatibilidade");
 
     // --- vertex buffer: um triângulo vermelho/verde/azul ---
     let vertices = [
@@ -203,18 +249,39 @@ fn draws_a_colored_triangle() {
     for i in 0..20 {
         pump_messages();
 
-        let view = swapchain
-            .render_target_view(&device)
-            .expect("falha ao obter a render target view");
-        context.set_render_target(view);
-        context.clear_render_target(view, background);
-        context.set_viewport(Viewport::full(800.0, 600.0));
-        context.set_pipeline(&pipeline);
-        context.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32);
-        context.draw(3, 0);
+        {
+            let view = swapchain
+                .render_target_view(&device)
+                .expect("falha ao obter a render target view");
+            let pass_desc = RenderPassDescriptor {
+                color: ColorAttachment {
+                    view,
+                    load: LoadOp::Clear(background),
+                },
+                depth: None,
+            };
+            let mut pass = context
+                .begin_render_pass(&pass_desc)
+                .expect("falha ao iniciar render pass");
+            assert!(pass.set_viewport(Viewport::full(0.0, 600.0)).is_err());
+            pass.set_viewport(Viewport::full(800.0, 600.0))
+                .expect("invalid viewport");
+            assert!(pass.set_pipeline(&incompatible_pipeline).is_err());
+            pass.set_pipeline(&pipeline)
+                .expect("pipeline compatível com o attachment");
+            pass.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32)
+                .expect("invalid vertex buffer binding");
+            assert!(pass.draw(0..4).is_err());
+            pass.draw(0..3).expect("falha ao desenhar o triangulo");
+            pass.end();
+        }
 
         if i == 19 {
-            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+            last_capture = Some(
+                swapchain
+                    .capture_frame(&device)
+                    .expect("falha ao capturar o quadro"),
+            );
         }
 
         swapchain.present().expect("falha ao apresentar");

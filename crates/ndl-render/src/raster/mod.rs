@@ -2,20 +2,103 @@
 //!
 //! ## Estado atual
 //!
-//! [`Viewport`] já é real — sem definir um viewport, o D3D11 não
-//! rasteriza nada visível mesmo com o resto do pipeline correto. O resto
-//! (`RasterizerState`, scissor, fill/cull mode, depth bias, ...) continua
-//! reservado; até existir, o rasterizer usa os estados padrão do D3D11
-//! (solid fill, back-face culling, sem scissor).
+//! [`Viewport`] e [`RasterizerState`] são reais, incluindo fill/cull mode,
+//! orientação da face e depth bias. Scissor dinâmico e controle de
+//! multisampling permanecem reservados.
 //!
 //! | Propriedade | Valores planejados |
 //! |---|---|
-//! | FillMode | Solid, Wireframe |
-//! | CullMode | None, Front, Back |
-//! | FrontFace | Clockwise, CounterClockwise |
-//! | DepthClip | Enabled, Disabled |
-//! | Scissor | Enabled, Disabled |
-//! | Multisample | Enabled, Disabled |
+//! | Propriedade | Estado |
+//! |---|---|
+//! | FillMode | implementado |
+//! | CullMode | implementado |
+//! | FrontFace | implementado |
+//! | DepthClip e depth bias | implementados |
+//! | Scissor e multisampling | reservados |
+
+use crate::core::{Device, GraphicsError};
+
+/// Modo de preenchimento dos triângulos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FillMode {
+    #[default]
+    Solid,
+    Wireframe,
+}
+
+/// Faces descartadas antes de rasterizar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CullMode {
+    None,
+    Front,
+    #[default]
+    Back,
+}
+
+/// Convenção de orientação da face frontal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FrontFace {
+    #[default]
+    CounterClockwise,
+    Clockwise,
+}
+
+/// Estado fixo de rasterização, sem scissor dinâmico.
+#[derive(Debug, Clone, Copy)]
+pub struct RasterizerStateDescriptor {
+    pub fill_mode: FillMode,
+    pub cull_mode: CullMode,
+    pub front_face: FrontFace,
+    pub depth_clip_enabled: bool,
+    pub depth_bias: i32,
+    pub depth_bias_clamp: f32,
+    pub slope_scaled_depth_bias: f32,
+}
+
+impl Default for RasterizerStateDescriptor {
+    fn default() -> Self {
+        Self {
+            fill_mode: FillMode::Solid,
+            cull_mode: CullMode::Back,
+            front_face: FrontFace::Clockwise,
+            depth_clip_enabled: true,
+            depth_bias: 0,
+            depth_bias_clamp: 0.0,
+            slope_scaled_depth_bias: 0.0,
+        }
+    }
+}
+
+/// Estado de rasterização criado no dispositivo.
+pub struct RasterizerState {
+    #[cfg(target_os = "windows")]
+    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11RasterizerState,
+}
+
+impl Device {
+    pub fn create_rasterizer_state(
+        &self,
+        desc: &RasterizerStateDescriptor,
+    ) -> Result<RasterizerState, GraphicsError> {
+        if !desc.depth_bias_clamp.is_finite() || !desc.slope_scaled_depth_bias.is_finite() {
+            return Err(GraphicsError::InvalidArgument {
+                name: "RasterizerStateDescriptor",
+                reason: "depth bias precisa conter valores finitos".into(),
+            });
+        }
+        #[cfg(target_os = "windows")]
+        {
+            crate::backend::directx::create_rasterizer_state(self, desc)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = desc;
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+}
 
 /// Região da superfície de destino em que a rasterização desenha,
 /// mapeando o volume de clip ([-1,1]) para coordenadas de pixel.

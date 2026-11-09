@@ -12,8 +12,8 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    MSG, PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, MSG,
+    PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 
 use ndl_render::core::{Device, DeviceDescriptor};
@@ -123,7 +123,11 @@ fn clears_a_real_window_to_a_color() {
         device.context().clear_render_target(view, clear_color);
 
         if i == 29 {
-            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+            last_capture = Some(
+                swapchain
+                    .capture_frame(&device)
+                    .expect("falha ao capturar o quadro"),
+            );
         }
 
         swapchain.present().expect("falha ao apresentar");
@@ -179,7 +183,11 @@ fn clears_using_context_and_view_directly() {
         context.flush();
 
         if i == 9 {
-            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+            last_capture = Some(
+                swapchain
+                    .capture_frame(&device)
+                    .expect("falha ao capturar o quadro"),
+            );
         }
 
         swapchain.present().expect("falha ao apresentar");

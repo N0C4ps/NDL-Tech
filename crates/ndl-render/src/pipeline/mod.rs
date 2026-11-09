@@ -6,15 +6,19 @@
 //!
 //! ## Estado atual
 //!
-//! [`GraphicsPipeline`] já é real, mas só com o essencial pra desenhar
-//! geometria colorida: vertex shader, pixel shader, input layout e
-//! topologia — o pipeline ainda usa os estados padrão do D3D11 para
-//! rasterizer/blend/depth-stencil (ver [`crate::context::Context::set_blend_state`]/
-//! `set_depth_stencil_state` para configurar isso fora do pipeline, por
-//! enquanto). [`ComputePipeline`] também já é real.
+//! [`GraphicsPipeline`] agrupa shaders, input layout, topologia e estados
+//! explícitos de rasterizer/blend/depth-stencil. A variante configurada
+//! declara também formatos esperados dos attachments, verificados ao
+//! vincular o pipeline a um [`crate::render::RenderPass`]. MRT, formatos de
+//! attachment múltiplos e MSAA ainda não fazem parte do contrato.
+//! [`ComputePipeline`] também já é real.
 
+use crate::blend::BlendStateDescriptor;
 use crate::core::{Device, GraphicsError};
+use crate::depth_stencil::DepthStencilStateDescriptor;
+use crate::format::Format;
 use crate::input::{InputLayout, PrimitiveTopology};
+use crate::raster::RasterizerStateDescriptor;
 use crate::shader::{ComputeShader, PixelShader, VertexShader};
 
 /// Configuração usada para criar um [`GraphicsPipeline`].
@@ -35,6 +39,26 @@ pub struct GraphicsPipeline {
     #[cfg(target_os = "windows")]
     pub(crate) input_layout: windows::Win32::Graphics::Direct3D11::ID3D11InputLayout,
     pub(crate) primitive_topology: PrimitiveTopology,
+    #[cfg(target_os = "windows")]
+    pub(crate) rasterizer_state: windows::Win32::Graphics::Direct3D11::ID3D11RasterizerState,
+    #[cfg(target_os = "windows")]
+    pub(crate) blend_state: windows::Win32::Graphics::Direct3D11::ID3D11BlendState,
+    #[cfg(target_os = "windows")]
+    pub(crate) depth_stencil_state: windows::Win32::Graphics::Direct3D11::ID3D11DepthStencilState,
+    pub(crate) stencil_reference: u32,
+    pub(crate) color_format: Option<Format>,
+    pub(crate) depth_format: Option<Format>,
+}
+
+/// Estados fixos e formatos dos attachments esperados pelo pipeline.
+#[derive(Debug, Clone, Copy)]
+pub struct GraphicsPipelineStateDescriptor {
+    pub rasterizer: RasterizerStateDescriptor,
+    pub blend: BlendStateDescriptor,
+    pub depth_stencil: DepthStencilStateDescriptor,
+    pub color_format: Format,
+    pub depth_format: Option<Format>,
+    pub stencil_reference: u8,
 }
 
 impl Device {
@@ -44,11 +68,21 @@ impl Device {
     ) -> Result<GraphicsPipeline, GraphicsError> {
         #[cfg(target_os = "windows")]
         {
+            let rasterizer = self.create_rasterizer_state(&RasterizerStateDescriptor::default())?;
+            let blend = self.create_blend_state(&BlendStateDescriptor::default())?;
+            let depth_stencil =
+                self.create_depth_stencil_state(&DepthStencilStateDescriptor::disabled())?;
             return Ok(GraphicsPipeline {
                 vertex_shader: desc.vertex_shader.raw.clone(),
                 pixel_shader: desc.pixel_shader.raw.clone(),
                 input_layout: desc.input_layout.raw.clone(),
                 primitive_topology: desc.primitive_topology,
+                rasterizer_state: rasterizer.raw,
+                blend_state: blend.raw,
+                depth_stencil_state: depth_stencil.raw,
+                color_format: None,
+                depth_format: None,
+                stencil_reference: 0,
             });
         }
         #[cfg(not(target_os = "windows"))]
@@ -60,10 +94,90 @@ impl Device {
         }
     }
 
+    /// Cria pipeline com estados fixos e formatos de attachment explícitos.
+    pub fn create_graphics_pipeline_with_state(
+        &self,
+        desc: &GraphicsPipelineDescriptor<'_>,
+        state: &GraphicsPipelineStateDescriptor,
+    ) -> Result<GraphicsPipeline, GraphicsError> {
+        if state.color_format.is_depth() || state.color_format.is_compressed() {
+            return Err(GraphicsError::InvalidArgument {
+                name: "color_format",
+                reason: "o formato precisa ser colorido e não comprimido".into(),
+            });
+        }
+        if !self.format_features(state.color_format)?.render_target {
+            return Err(GraphicsError::FeatureNotSupported {
+                feature: format!("color attachment no formato {:?}", state.color_format),
+            });
+        }
+        if let Some(format) = state.depth_format {
+            if !format.is_depth() {
+                return Err(GraphicsError::InvalidArgument {
+                    name: "depth_format",
+                    reason: "o formato precisa ser depth/stencil".into(),
+                });
+            }
+            if !self.format_features(format)?.depth_stencil {
+                return Err(GraphicsError::FeatureNotSupported {
+                    feature: format!("depth attachment no formato {format:?}"),
+                });
+            }
+        }
+        if (state.depth_stencil.depth_test_enabled
+            || state.depth_stencil.depth_write_enabled
+            || state.depth_stencil.stencil_test_enabled)
+            && state.depth_format.is_none()
+        {
+            return Err(GraphicsError::IncompatibleResource {
+                operation: "create_graphics_pipeline",
+                reason: "depth test, escrita de depth ou stencil exige depth_format".into(),
+            });
+        }
+        if state.depth_stencil.stencil_test_enabled
+            && !state.depth_format.is_some_and(Format::is_stencil)
+        {
+            return Err(GraphicsError::IncompatibleResource {
+                operation: "create_graphics_pipeline",
+                reason: "stencil test exige um formato de depth/stencil com canal stencil".into(),
+            });
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let rasterizer = self.create_rasterizer_state(&state.rasterizer)?;
+            let blend = self.create_blend_state(&state.blend)?;
+            let depth_stencil = self.create_depth_stencil_state(&state.depth_stencil)?;
+            Ok(GraphicsPipeline {
+                vertex_shader: desc.vertex_shader.raw.clone(),
+                pixel_shader: desc.pixel_shader.raw.clone(),
+                input_layout: desc.input_layout.raw.clone(),
+                primitive_topology: desc.primitive_topology,
+                rasterizer_state: rasterizer.raw,
+                blend_state: blend.raw,
+                depth_stencil_state: depth_stencil.raw,
+                color_format: Some(state.color_format),
+                depth_format: state.depth_format,
+                stencil_reference: state.stencil_reference as u32,
+            })
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (desc, state);
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+
     pub fn create_compute_pipeline(
         &self,
         desc: &ComputePipelineDescriptor<'_>,
     ) -> Result<ComputePipeline, GraphicsError> {
+        if !self.capabilities().supports_compute() {
+            return Err(GraphicsError::FeatureNotSupported {
+                feature: "compute shaders não suportados pelo dispositivo".into(),
+            });
+        }
         #[cfg(target_os = "windows")]
         {
             return Ok(ComputePipeline {

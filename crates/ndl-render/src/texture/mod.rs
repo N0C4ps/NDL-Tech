@@ -71,6 +71,57 @@ impl Device {
         desc: &TextureDescriptor,
         data: &[u8],
     ) -> Result<Texture2D, GraphicsError> {
+        if desc.width == 0 || desc.height == 0 {
+            return Err(GraphicsError::InvalidArgument {
+                name: "TextureDescriptor::extent",
+                reason: "largura e altura precisam ser maiores que zero".into(),
+            });
+        }
+        let limits = self.limits();
+        if desc.width > limits.max_texture_dimension_2d
+            || desc.height > limits.max_texture_dimension_2d
+        {
+            return Err(GraphicsError::InvalidArgument {
+                name: "TextureDescriptor::extent",
+                reason: format!(
+                    "{}x{} excede o limite 2D {}x{}",
+                    desc.width,
+                    desc.height,
+                    limits.max_texture_dimension_2d,
+                    limits.max_texture_dimension_2d
+                ),
+            });
+        }
+        if desc.format.is_depth() {
+            return Err(GraphicsError::IncompatibleResource {
+                operation: "create_texture_2d",
+                reason: "formatos depth/stencil requerem create_depth_texture".into(),
+            });
+        }
+        if desc.format.is_compressed() {
+            return Err(GraphicsError::FeatureNotSupported {
+                feature: "upload inicial de formatos comprimidos ainda não implementado".into(),
+            });
+        }
+        let expected = (desc.width as u64)
+            .checked_mul(desc.height as u64)
+            .and_then(|n| n.checked_mul((desc.format.bits_per_pixel() / 8) as u64))
+            .ok_or_else(|| GraphicsError::InvalidArgument {
+                name: "TextureDescriptor",
+                reason: "dimensões causam overflow no cálculo do tamanho".into(),
+            })?;
+        if data.len() as u64 != expected {
+            return Err(GraphicsError::DataSizeMismatch {
+                expected,
+                actual: data.len() as u64,
+            });
+        }
+        let format_features = self.format_features(desc.format)?;
+        if !format_features.texture_2d || !format_features.sampled {
+            return Err(GraphicsError::FeatureNotSupported {
+                feature: format!("textura 2D amostrável no formato {:?}", desc.format),
+            });
+        }
         #[cfg(target_os = "windows")]
         {
             return crate::backend::directx::create_texture_2d(self, desc, data);

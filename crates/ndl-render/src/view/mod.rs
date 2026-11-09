@@ -22,12 +22,34 @@
 pub struct RenderTargetView {
     #[cfg(target_os = "windows")]
     pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11RenderTargetView,
+    pub(crate) format: crate::format::Format,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 impl RenderTargetView {
     #[cfg(target_os = "windows")]
-    pub(crate) fn from_raw(raw: windows::Win32::Graphics::Direct3D11::ID3D11RenderTargetView) -> Self {
-        Self { raw }
+    pub(crate) fn from_raw(
+        raw: windows::Win32::Graphics::Direct3D11::ID3D11RenderTargetView,
+        format: crate::format::Format,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        Self {
+            raw,
+            format,
+            width,
+            height,
+        }
+    }
+}
+
+impl RenderTargetView {
+    pub fn format(&self) -> crate::format::Format {
+        self.format
+    }
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.width, self.height)
     }
 }
 
@@ -52,14 +74,34 @@ impl ShaderResourceView {
 pub struct DepthStencilView {
     #[cfg(target_os = "windows")]
     pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11DepthStencilView,
+    pub(crate) format: crate::format::Format,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 impl DepthStencilView {
     #[cfg(target_os = "windows")]
     pub(crate) fn from_raw(
         raw: windows::Win32::Graphics::Direct3D11::ID3D11DepthStencilView,
+        format: crate::format::Format,
+        width: u32,
+        height: u32,
     ) -> Self {
-        Self { raw }
+        Self {
+            raw,
+            format,
+            width,
+            height,
+        }
+    }
+}
+
+impl DepthStencilView {
+    pub fn format(&self) -> crate::format::Format {
+        self.format
+    }
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.width, self.height)
     }
 }
 

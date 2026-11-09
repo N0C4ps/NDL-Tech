@@ -11,8 +11,8 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    MSG, PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, MSG,
+    PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 
 use ndl_render::buffer::{BufferDescriptor, BufferUsage};
@@ -159,9 +159,18 @@ fn transfer_query_sync_and_debug_markers() {
         .expect("falha ao criar pipeline");
 
     let vertices = [
-        Vertex { position: [0.0, 0.5], color: [1.0, 0.8, 0.2] },
-        Vertex { position: [0.5, -0.5], color: [0.2, 0.8, 1.0] },
-        Vertex { position: [-0.5, -0.5], color: [0.8, 0.2, 1.0] },
+        Vertex {
+            position: [0.0, 0.5],
+            color: [1.0, 0.8, 0.2],
+        },
+        Vertex {
+            position: [0.5, -0.5],
+            color: [0.2, 0.8, 1.0],
+        },
+        Vertex {
+            position: [-0.5, -0.5],
+            color: [0.8, 0.2, 1.0],
+        },
     ];
     let vertex_bytes = unsafe {
         std::slice::from_raw_parts(
@@ -241,13 +250,17 @@ fn transfer_query_sync_and_debug_markers() {
         context.push_debug_group("frame");
         context.set_render_target(view);
         context.clear_render_target(view, background);
-        context.set_viewport(Viewport::full(800.0, 600.0));
+        context
+            .set_viewport(Viewport::full(800.0, 600.0))
+            .expect("invalid viewport");
         context.set_pipeline(&pipeline);
-        context.set_vertex_buffer(0, &vertex_buffer_copy, std::mem::size_of::<Vertex>() as u32);
+        context
+            .set_vertex_buffer(0, &vertex_buffer_copy, std::mem::size_of::<Vertex>() as u32)
+            .expect("invalid vertex buffer binding");
 
         context.begin_query(&occlusion_query);
         context.insert_debug_marker("draw triangle");
-        context.draw(3, 0);
+        context.draw(3, 0).expect("invalid vertex draw");
         context.end_query(&occlusion_query);
         context.pop_debug_group();
 
@@ -255,7 +268,11 @@ fn transfer_query_sync_and_debug_markers() {
         fence.wait(&context);
 
         if i == 14 {
-            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+            last_capture = Some(
+                swapchain
+                    .capture_frame(&device)
+                    .expect("falha ao capturar o quadro"),
+            );
         }
 
         swapchain.present().expect("falha ao apresentar");
@@ -277,7 +294,10 @@ fn transfer_query_sync_and_debug_markers() {
     // esperou a GPU terminar o último quadro, que é posterior ao
     // end_query.
     let pixels_drawn = context.get_occlusion_result(&occlusion_query);
-    assert!(pixels_drawn.is_some(), "query de oclusão deveria estar pronta");
+    assert!(
+        pixels_drawn.is_some(),
+        "query de oclusão deveria estar pronta"
+    );
 
     unsafe {
         let _ = DestroyWindow(hwnd);

@@ -13,8 +13,8 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    MSG, PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, MSG,
+    PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 
 use ndl_math::{Mat4, Vec3};
@@ -211,12 +211,30 @@ fn draws_a_textured_pulsing_quad() {
 
     // --- quad (2 triângulos) ---
     let vertices = [
-        Vertex { position: [-0.5, 0.5], uv: [0.0, 0.0] },
-        Vertex { position: [0.5, 0.5], uv: [1.0, 0.0] },
-        Vertex { position: [-0.5, -0.5], uv: [0.0, 1.0] },
-        Vertex { position: [-0.5, -0.5], uv: [0.0, 1.0] },
-        Vertex { position: [0.5, 0.5], uv: [1.0, 0.0] },
-        Vertex { position: [0.5, -0.5], uv: [1.0, 1.0] },
+        Vertex {
+            position: [-0.5, 0.5],
+            uv: [0.0, 0.0],
+        },
+        Vertex {
+            position: [0.5, 0.5],
+            uv: [1.0, 0.0],
+        },
+        Vertex {
+            position: [-0.5, -0.5],
+            uv: [0.0, 1.0],
+        },
+        Vertex {
+            position: [-0.5, -0.5],
+            uv: [0.0, 1.0],
+        },
+        Vertex {
+            position: [0.5, 0.5],
+            uv: [1.0, 0.0],
+        },
+        Vertex {
+            position: [0.5, -0.5],
+            uv: [1.0, 1.0],
+        },
     ];
     let vertex_bytes = unsafe {
         std::slice::from_raw_parts(
@@ -242,7 +260,7 @@ fn draws_a_textured_pulsing_quad() {
             size: 64, // float4x4
             usage: BufferUsage::Constant,
             dynamic: false,
-                stride: 0,
+            stride: 0,
         })
         .expect("falha ao criar constant buffer");
 
@@ -258,26 +276,53 @@ fn draws_a_textured_pulsing_quad() {
         let t = frame as f32 * 0.1;
         let scale = 0.6 + 0.3 * t.sin();
         let transform = Mat4::from_scale(Vec3::new(scale, scale, scale));
-        context.update_buffer(&transform_buffer, &mat4_to_bytes(&transform));
+        context
+            .update_buffer(&transform_buffer, &mat4_to_bytes(&transform))
+            .expect("invalid constant buffer update");
 
         let view = swapchain
             .render_target_view(&device)
             .expect("falha ao obter a render target view");
         context.set_render_target(view);
         context.clear_render_target(view, background);
-        context.set_viewport(Viewport::full(800.0, 600.0));
+        context
+            .set_viewport(Viewport::full(800.0, 600.0))
+            .expect("invalid viewport");
         context.set_pipeline(&pipeline);
-        context.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32);
-        context.set_constant_buffer(0, &transform_buffer);
-        context.set_shader_resource(0, &texture_view);
-        context.set_sampler(0, &sampler);
-        context.draw(6, 0);
+        context
+            .set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32)
+            .expect("invalid vertex buffer binding");
+        context
+            .set_constant_buffer(0, &transform_buffer)
+            .expect("invalid constant buffer binding");
+        assert!(context
+            .set_constant_buffer(
+                device.limits().max_uniform_buffer_bindings,
+                &transform_buffer
+            )
+            .is_err());
+        assert!(context
+            .set_shader_resource(device.limits().max_sampled_resource_bindings, &texture_view)
+            .is_err());
+        context
+            .set_shader_resource(0, &texture_view)
+            .expect("invalid shader resource slot");
+        assert!(context
+            .set_sampler(device.limits().max_sampler_bindings, &sampler)
+            .is_err());
+        context
+            .set_sampler(0, &sampler)
+            .expect("invalid sampler slot");
+        context.draw(6, 0).expect("invalid vertex draw");
 
         // No quadro 0, `scale` é exatamente 0.6 (sin(0) = 0) — captura
         // aqui porque dá pra calcular de antemão onde o quad cai na tela.
         if frame == 0 {
-            first_frame_capture =
-                Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+            first_frame_capture = Some(
+                swapchain
+                    .capture_frame(&device)
+                    .expect("falha ao capturar o quadro"),
+            );
         }
 
         swapchain.present().expect("falha ao apresentar");
@@ -298,16 +343,28 @@ fn draws_a_textured_pulsing_quad() {
     );
 
     let top_left = capture.pixel_rgba(340, 255); // uv ~ (0.25, 0.25) -> branco
-    assert!(top_left[0] > 200, "quadrante uv(0.25,0.25) deveria ser branco, obtido {top_left:?}");
+    assert!(
+        top_left[0] > 200,
+        "quadrante uv(0.25,0.25) deveria ser branco, obtido {top_left:?}"
+    );
 
     let top_right = capture.pixel_rgba(460, 255); // uv ~ (0.75, 0.25) -> preto
-    assert!(top_right[0] < 50, "quadrante uv(0.75,0.25) deveria ser preto, obtido {top_right:?}");
+    assert!(
+        top_right[0] < 50,
+        "quadrante uv(0.75,0.25) deveria ser preto, obtido {top_right:?}"
+    );
 
     let bottom_left = capture.pixel_rgba(340, 345); // uv ~ (0.25, 0.75) -> preto
-    assert!(bottom_left[0] < 50, "quadrante uv(0.25,0.75) deveria ser preto, obtido {bottom_left:?}");
+    assert!(
+        bottom_left[0] < 50,
+        "quadrante uv(0.25,0.75) deveria ser preto, obtido {bottom_left:?}"
+    );
 
     let bottom_right = capture.pixel_rgba(460, 345); // uv ~ (0.75, 0.75) -> branco
-    assert!(bottom_right[0] > 200, "quadrante uv(0.75,0.75) deveria ser branco, obtido {bottom_right:?}");
+    assert!(
+        bottom_right[0] > 200,
+        "quadrante uv(0.75,0.75) deveria ser branco, obtido {bottom_right:?}"
+    );
 
     unsafe {
         let _ = DestroyWindow(hwnd);

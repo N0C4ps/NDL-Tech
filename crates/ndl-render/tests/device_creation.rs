@@ -1,4 +1,4 @@
-use ndl_render::core::{Device, DeviceDescriptor, Instance};
+use ndl_render::core::{Device, DeviceDescriptor, Instance, LimitsSource};
 
 #[test]
 #[cfg(target_os = "windows")]
@@ -6,11 +6,12 @@ fn create_default_hardware_device() {
     let device = Device::new(&DeviceDescriptor::default()).expect("falha ao criar device");
 
     let caps = device.capabilities();
-    println!("feature level: {:?}", caps.feature_level);
-    println!("is_software: {}", caps.is_software);
-    println!("supports_compute: {}", caps.supports_compute);
+    println!("backend: {:?}", device.backend_api());
+    println!("is_software: {}", device.is_software());
+    println!("supports_compute: {}", caps.supports_compute());
 
     assert!(!device.is_lost());
+    assert_eq!(device.limits_source(), LimitsSource::ApiGuarantee);
 
     let limits = device.limits();
     assert!(limits.max_texture_dimension_2d >= 2048);
@@ -24,16 +25,21 @@ fn create_warp_software_device() {
         ..Default::default()
     };
     let device = Device::new(&descriptor).expect("falha ao criar device WARP");
-    assert!(device.capabilities().is_software);
+    assert!(device.is_software());
 }
 
 #[test]
 #[cfg(target_os = "windows")]
 fn enumerate_adapters_finds_at_least_one() {
     let instance = Instance::new().expect("instance init");
-    let adapters = instance.enumerate_adapters().expect("falha ao enumerar adaptadores");
+    let adapters = instance
+        .enumerate_adapters()
+        .expect("falha ao enumerar adaptadores");
 
-    assert!(!adapters.is_empty(), "esperava pelo menos um adaptador gráfico");
+    assert!(
+        !adapters.is_empty(),
+        "esperava pelo menos um adaptador gráfico"
+    );
     for adapter in &adapters {
         println!(
             "adapter: {} (vendor=0x{:04x} device=0x{:04x} software={} vram={}MB)",

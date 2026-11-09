@@ -13,8 +13,8 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    MSG, PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, MSG,
+    PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 
 use ndl_render::buffer::{BufferDescriptor, BufferUsage};
@@ -160,9 +160,18 @@ fn records_draw_in_a_deferred_context_and_submits_to_the_queue() {
         .expect("falha ao criar pipeline");
 
     let vertices = [
-        Vertex { position: [0.0, 0.5], color: [1.0, 1.0, 0.0] },
-        Vertex { position: [0.5, -0.5], color: [0.0, 1.0, 1.0] },
-        Vertex { position: [-0.5, -0.5], color: [1.0, 0.0, 1.0] },
+        Vertex {
+            position: [0.0, 0.5],
+            color: [1.0, 1.0, 0.0],
+        },
+        Vertex {
+            position: [0.5, -0.5],
+            color: [0.0, 1.0, 1.0],
+        },
+        Vertex {
+            position: [-0.5, -0.5],
+            color: [1.0, 0.0, 1.0],
+        },
     ];
     let vertex_bytes = unsafe {
         std::slice::from_raw_parts(
@@ -200,10 +209,14 @@ fn records_draw_in_a_deferred_context_and_submits_to_the_queue() {
             .expect("falha ao criar command encoder");
         encoder.set_render_target(view);
         encoder.clear_render_target(view, background);
-        encoder.set_viewport(Viewport::full(800.0, 600.0));
+        encoder
+            .set_viewport(Viewport::full(800.0, 600.0))
+            .expect("invalid viewport");
         encoder.set_pipeline(&pipeline);
-        encoder.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32);
-        encoder.draw(3, 0);
+        encoder
+            .set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32)
+            .expect("invalid vertex buffer binding");
+        encoder.draw(3, 0).expect("invalid vertex draw");
         let command_buffer = encoder.finish().expect("falha ao finalizar a gravação");
 
         // Só agora o trabalho gravado de fato roda na GPU.
@@ -211,7 +224,11 @@ fn records_draw_in_a_deferred_context_and_submits_to_the_queue() {
         queue.wait_idle().expect("falha ao esperar a GPU");
 
         if i == 14 {
-            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+            last_capture = Some(
+                swapchain
+                    .capture_frame(&device)
+                    .expect("falha ao capturar o quadro"),
+            );
         }
 
         swapchain.present().expect("falha ao apresentar");

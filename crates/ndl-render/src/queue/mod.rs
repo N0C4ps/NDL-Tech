@@ -31,6 +31,7 @@ impl GraphicsQueue {
     /// Executa, em ordem, cada [`CommandBuffer`] gravado por um
     /// [`crate::command::CommandEncoder`].
     pub fn submit(&self, buffers: &[CommandBuffer]) -> Result<(), GraphicsError> {
+        let _guard = self.context.lock_context();
         #[cfg(target_os = "windows")]
         {
             for buffer in buffers {
@@ -56,6 +57,7 @@ impl GraphicsQueue {
     /// Bloqueia até a GPU terminar de processar todo o trabalho submetido
     /// até agora.
     pub fn wait_idle(&self) -> Result<(), GraphicsError> {
+        let _guard = self.context.lock_context();
         #[cfg(target_os = "windows")]
         {
             crate::backend::directx::wait_idle(&self.context)

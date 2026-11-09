@@ -46,12 +46,19 @@ cursor, monitores), com os backends `headless` e `windows` (via `winit`)
 funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
 árvore de módulos como stubs reservados para a integração real com cada SO.
 
-Todos os 25 módulos planejados de `ndl-render` já têm implementação real
-contra o backend Direct3D 11: device/adapter, surface/swapchain, buffers
-(vertex/index/constant/storage/staging), shaders HLSL (vertex/pixel/
-compute), texturas/sampler, pipeline (gráfico e de computação), depth/
-blend, contextos diferidos/fila, alocadores de alto nível, cópias,
-queries, sincronização e debug.
+Os 25 módulos planejados de `ndl-render` já existem na árvore. Vários têm
+implementação funcional contra o backend Direct3D 11, incluindo device/
+adapter, surface/swapchain, buffers, shaders HLSL (vertex/pixel/compute),
+texturas/sampler, pipelines gráficos com estado fixo explícito, depth/blend, gravação diferida e fila lógica,
+cópias, queries, sincronização e debug. Isso descreve o subconjunto já
+implementado, não uma API completa: cada módulo documenta seus recursos
+disponíveis e pendências, e partes como múltiplos backends, MRT, shaders
+geometry/hull/domain e operações de inspeção continuam reservadas.
+Pipelines podem declarar formatos esperados de cor e depth; o `RenderPass`
+confere esses formatos e dimensões antes de emitir draws. O estado fixo atual
+inclui rasterização, blend (incluindo alpha separado e máscara de canais) e
+depth/stencil com operações por face; stencil reference é definido no
+descritor do pipeline.
 
 Os testes de renderização não só checam "não quebrou" — `Swapchain::capture_frame`
 lê de volta os pixels reais do back buffer (via staging texture), e os
@@ -63,9 +70,12 @@ de teste (um ponto de verificação caindo exatamente sobre um vértice, com
 `Context::map_read` e compara byte a byte com o original, em vez de só
 confiar que `CopyResource` não lançou erro.
 
-`CommandEncoder` reaproveita a própria `Context` por baixo (via `Deref`) —
-no D3D11, um contexto diferido é a mesma interface do contexto imediato,
-só que os comandos não rodam na GPU até `ExecuteCommandList`.
+`CommandEncoder` reaproveita a API pública de `Context` por baixo (via
+`Deref`), mas mantém um contexto diferido e estado de bindings próprios.
+Handles de `Device::context()` compartilham o contexto imediato; as chamadas
+e submissões da crate são serializadas individualmente. Uma sequência de
+várias chamadas imediatas ainda pode ser intercalada entre threads; grave
+sequências indivisíveis num `CommandEncoder` e submeta-as pela fila.
 
 Testado com um triângulo colorido (`tests/triangle.rs`), um quad
 texturizado que pulsa de tamanho via uma matriz de `ndl-math` enviada por
@@ -78,7 +88,8 @@ em vez do contexto imediato direto (`tests/command_queue.rs`).
 
 `Device::new()` cria um dispositivo Direct3D 11 de verdade (via
 `backend::directx`, `windows-rs`), com `DeviceCapabilities`/`DeviceLimits`
-derivados do `FeatureLevel` obtido; `Instance::enumerate_adapters()` lista
+traduzidos pelo backend para capacidades e limites portaveis;
+`Instance::enumerate_adapters()` lista
 as GPUs do sistema via DXGI; `Surface`/`Swapchain` conectam um
 `RawWindowHandle` (crate `raw-window-handle`) a uma swapchain real.
 

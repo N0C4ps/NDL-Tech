@@ -38,13 +38,15 @@ pub struct MappedBuffer<'a> {
 impl MappedBuffer<'_> {
     /// Copia `data` para o início da região mapeada. `data` não pode ser
     /// maior que o tamanho do buffer.
-    pub fn copy_from_slice(&mut self, data: &[u8]) {
-        assert!(
-            data.len() <= self.size,
-            "dados ({} bytes) maiores que o buffer mapeado ({} bytes)",
-            data.len(),
-            self.size
-        );
+    pub fn copy_from_slice(&mut self, data: &[u8]) -> Result<(), GraphicsError> {
+        if data.len() > self.size {
+            return Err(GraphicsError::OutOfBounds {
+                resource: "MappedBuffer",
+                offset: 0,
+                size: data.len() as u64,
+                limit: self.size as u64,
+            });
+        }
         #[cfg(target_os = "windows")]
         unsafe {
             std::ptr::copy_nonoverlapping(data.as_ptr(), self.ptr, data.len());
@@ -53,6 +55,7 @@ impl MappedBuffer<'_> {
         {
             let _ = data;
         }
+        Ok(())
     }
 }
 
@@ -74,7 +77,16 @@ impl Context {
     /// `BufferDescriptor::dynamic = true`) para escrita da CPU,
     /// descartando o conteúdo anterior — o backend pode devolver uma
     /// região de memória nova em vez de esperar a GPU liberar a antiga.
-    pub fn map_write_discard<'a>(&'a self, buffer: &'a Buffer) -> Result<MappedBuffer<'a>, GraphicsError> {
+    pub fn map_write_discard<'a>(
+        &'a self,
+        buffer: &'a Buffer,
+    ) -> Result<MappedBuffer<'a>, GraphicsError> {
+        if !buffer.is_dynamic() || buffer.usage() == BufferUsage::Staging {
+            return Err(GraphicsError::IncompatibleResource {
+                operation: "map_write_discard",
+                reason: "exige buffer dynamic que não seja staging".into(),
+            });
+        }
         #[cfg(target_os = "windows")]
         {
             crate::backend::directx::map_write_discard(self, buffer)
@@ -93,7 +105,16 @@ impl Context {
     /// volta dados que a GPU escreveu (ex: o resultado de um compute
     /// shader), depois de um [`Context::copy_buffer`] para um buffer de
     /// staging.
-    pub fn map_read<'a>(&'a self, buffer: &'a Buffer) -> Result<ReadMappedBuffer<'a>, GraphicsError> {
+    pub fn map_read<'a>(
+        &'a self,
+        buffer: &'a Buffer,
+    ) -> Result<ReadMappedBuffer<'a>, GraphicsError> {
+        if buffer.usage() != BufferUsage::Staging {
+            return Err(GraphicsError::IncompatibleResource {
+                operation: "map_read",
+                reason: "leitura pela CPU exige BufferUsage::Staging".into(),
+            });
+        }
         #[cfg(target_os = "windows")]
         {
             crate::backend::directx::map_read(self, buffer)
@@ -157,7 +178,17 @@ impl ConstantBufferRing {
     /// Cria um ring com `frame_count` buffers de `buffer_size` bytes cada
     /// (ex: `frame_count = 2` ou `3`, casando com o número de buffers da
     /// swapchain).
-    pub fn new(device: &Device, buffer_size: u64, frame_count: usize) -> Result<Self, GraphicsError> {
+    pub fn new(
+        device: &Device,
+        buffer_size: u64,
+        frame_count: usize,
+    ) -> Result<Self, GraphicsError> {
+        if frame_count == 0 {
+            return Err(GraphicsError::InvalidArgument {
+                name: "frame_count",
+                reason: "deve ser maior que zero".into(),
+            });
+        }
         let mut buffers = Vec::with_capacity(frame_count);
         for _ in 0..frame_count {
             buffers.push(device.create_buffer(&BufferDescriptor {
@@ -177,12 +208,21 @@ impl ConstantBufferRing {
     /// [`Context::map_write_discard`]) e o retorna, pronto para
     /// `Context::set_constant_buffer`.
     pub fn write(&mut self, context: &Context, data: &[u8]) -> Result<&Buffer, GraphicsError> {
+        let buffer_size = self.buffers.first().map(Buffer::size).unwrap_or(0);
+        if data.len() as u64 > buffer_size {
+            return Err(GraphicsError::OutOfBounds {
+                resource: "ConstantBufferRing",
+                offset: 0,
+                size: data.len() as u64,
+                limit: buffer_size,
+            });
+        }
         let index = self.next_index;
         self.next_index = (self.next_index + 1) % self.buffers.len();
 
         let buffer = &self.buffers[index];
         let mut mapped = context.map_write_discard(buffer)?;
-        mapped.copy_from_slice(data);
+        mapped.copy_from_slice(data)?;
         drop(mapped);
 
         Ok(&self.buffers[index])

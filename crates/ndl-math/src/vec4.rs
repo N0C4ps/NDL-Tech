@@ -41,14 +41,24 @@ impl Vec4 {
 impl Add for Vec4 {
     type Output = Vec4;
     fn add(self, rhs: Vec4) -> Vec4 {
-        Vec4::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z, self.w + rhs.w)
+        Vec4::new(
+            self.x + rhs.x,
+            self.y + rhs.y,
+            self.z + rhs.z,
+            self.w + rhs.w,
+        )
     }
 }
 
 impl Sub for Vec4 {
     type Output = Vec4;
     fn sub(self, rhs: Vec4) -> Vec4 {
-        Vec4::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z, self.w - rhs.w)
+        Vec4::new(
+            self.x - rhs.x,
+            self.y - rhs.y,
+            self.z - rhs.z,
+            self.w - rhs.w,
+        )
     }
 }
 

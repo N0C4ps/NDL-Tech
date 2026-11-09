@@ -10,11 +10,11 @@
 //!
 //! ## Estado atual
 //!
-//! [`CommandEncoder`] já é real: ele é um [`crate::context::Context`] por
-//! baixo (os dois compartilham a mesma interface nativa), então todos os
-//! métodos de desenho/bind de `Context` (`set_pipeline`, `draw`,
-//! `set_vertex_buffer`, ...) já funcionam nele via `Deref` — a única
-//! coisa exclusiva de `CommandEncoder` é [`CommandEncoder::finish`].
+//! [`CommandEncoder`] já grava comandos num contexto diferido próprio; sua API
+//! reaproveita os métodos de [`crate::context::Context`] via `Deref`, mas seu
+//! estado de bindings é independente do contexto imediato. `finish` produz
+//! uma lista que a fila executa no contexto imediato, serializada com as
+//! demais chamadas feitas por esta crate.
 //! [`CommandBuffer`] também já é real.
 //!
 //! Operações mais específicas de gravação (`reset()`, `discard_recording()`,
@@ -28,10 +28,10 @@ use crate::core::{Device, GraphicsError};
 /// Grava comandos de desenho/bind num contexto diferido, sem executá-los
 /// na GPU imediatamente — ver [`CommandEncoder::finish`].
 ///
-/// Todos os métodos de [`Context`] (`set_pipeline`, `draw`,
-/// `set_vertex_buffer`, `clear_render_target`, ...) estão disponíveis
-/// aqui via `Deref`, porque gravar comandos é exatamente a mesma API de
-/// emitir comandos — a diferença é só quando eles de fato rodam na GPU.
+/// Os métodos de [`Context`] (`set_pipeline`, `draw`, `set_vertex_buffer`,
+/// `clear_render_target`, ...) estão disponíveis via `Deref`. O encoder possui
+/// um contexto e estado próprios; só a execução da lista final entra na
+/// sequência compartilhada do contexto imediato.
 pub struct CommandEncoder {
     context: Context,
 }

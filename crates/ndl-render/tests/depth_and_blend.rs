@@ -8,14 +8,14 @@
 use std::num::NonZeroIsize;
 
 use raw_window_handle::{RawWindowHandle, Win32WindowHandle};
-use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    MSG, PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassW,
+    TranslateMessage, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
+use windows::core::w;
 
 use ndl_render::blend::BlendStateDescriptor;
 use ndl_render::buffer::{BufferDescriptor, BufferUsage};
@@ -23,7 +23,7 @@ use ndl_render::core::{Device, DeviceDescriptor};
 use ndl_render::depth_stencil::DepthStencilStateDescriptor;
 use ndl_render::format::Format;
 use ndl_render::input::{IndexFormat, PrimitiveTopology, VertexAttribute};
-use ndl_render::pipeline::GraphicsPipelineDescriptor;
+use ndl_render::pipeline::{GraphicsPipelineDescriptor, GraphicsPipelineStateDescriptor};
 use ndl_render::raster::Viewport;
 use ndl_render::shader::compile_hlsl;
 use ndl_render::surface::{Extent2D, Surface, Swapchain, SwapchainDescriptor};
@@ -126,10 +126,6 @@ fn depth_test_and_blend_with_indexed_draws() {
     let depth_view = device
         .create_depth_texture(800, 600, Format::D32Float)
         .expect("falha ao criar depth buffer");
-    let depth_state = device
-        .create_depth_stencil_state(&DepthStencilStateDescriptor::depth_read_write())
-        .expect("falha ao criar depth stencil state");
-
     let opaque_blend = device
         .create_blend_state(&BlendStateDescriptor::opaque())
         .expect("falha ao criar blend state opaco");
@@ -166,14 +162,25 @@ fn depth_test_and_blend_with_indexed_draws() {
         .create_input_layout(&attributes, &vertex_shader)
         .expect("falha ao criar input layout");
 
+    let pipeline_desc = GraphicsPipelineDescriptor {
+        vertex_shader: &vertex_shader,
+        pixel_shader: &pixel_shader,
+        input_layout: &input_layout,
+        primitive_topology: PrimitiveTopology::TriangleList,
+    };
     let pipeline = device
-        .create_graphics_pipeline(&GraphicsPipelineDescriptor {
-            vertex_shader: &vertex_shader,
-            pixel_shader: &pixel_shader,
-            input_layout: &input_layout,
-            primitive_topology: PrimitiveTopology::TriangleList,
-        })
-        .expect("falha ao criar pipeline");
+        .create_graphics_pipeline_with_state(
+            &pipeline_desc,
+            &GraphicsPipelineStateDescriptor {
+                rasterizer: Default::default(),
+                blend: BlendStateDescriptor::opaque(),
+                depth_stencil: DepthStencilStateDescriptor::depth_read_write(),
+                color_format: Format::Bgra8Unorm,
+                depth_format: Some(Format::D32Float),
+                stencil_reference: 0,
+            },
+        )
+        .expect("falha ao criar pipeline com depth explícito");
 
     // Vértices 0..3: triângulo vermelho, longe (z = 0.8).
     // Vértices 3..6: triângulo verde, perto (z = 0.2), mesma área na tela
@@ -181,16 +188,46 @@ fn depth_test_and_blend_with_indexed_draws() {
     // Vértices 6..10: quad azul semi-transparente, ainda mais perto
     //                 (z = 0.1), por cima dos dois via blend.
     let vertices = [
-        Vertex { position: [-0.6, 0.6, 0.8], color: [1.0, 0.0, 0.0, 1.0] },
-        Vertex { position: [0.6, 0.6, 0.8], color: [1.0, 0.0, 0.0, 1.0] },
-        Vertex { position: [0.0, -0.6, 0.8], color: [1.0, 0.0, 0.0, 1.0] },
-        Vertex { position: [-0.6, 0.6, 0.2], color: [0.0, 1.0, 0.0, 1.0] },
-        Vertex { position: [0.6, 0.6, 0.2], color: [0.0, 1.0, 0.0, 1.0] },
-        Vertex { position: [0.0, -0.6, 0.2], color: [0.0, 1.0, 0.0, 1.0] },
-        Vertex { position: [-0.3, 0.3, 0.1], color: [0.0, 0.3, 1.0, 0.4] },
-        Vertex { position: [0.3, 0.3, 0.1], color: [0.0, 0.3, 1.0, 0.4] },
-        Vertex { position: [-0.3, -0.3, 0.1], color: [0.0, 0.3, 1.0, 0.4] },
-        Vertex { position: [0.3, -0.3, 0.1], color: [0.0, 0.3, 1.0, 0.4] },
+        Vertex {
+            position: [-0.6, 0.6, 0.8],
+            color: [1.0, 0.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [0.6, 0.6, 0.8],
+            color: [1.0, 0.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [0.0, -0.6, 0.8],
+            color: [1.0, 0.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [-0.6, 0.6, 0.2],
+            color: [0.0, 1.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [0.6, 0.6, 0.2],
+            color: [0.0, 1.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [0.0, -0.6, 0.2],
+            color: [0.0, 1.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [-0.3, 0.3, 0.1],
+            color: [0.0, 0.3, 1.0, 0.4],
+        },
+        Vertex {
+            position: [0.3, 0.3, 0.1],
+            color: [0.0, 0.3, 1.0, 0.4],
+        },
+        Vertex {
+            position: [-0.3, -0.3, 0.1],
+            color: [0.0, 0.3, 1.0, 0.4],
+        },
+        Vertex {
+            position: [0.3, -0.3, 0.1],
+            color: [0.0, 0.3, 1.0, 0.4],
+        },
     ];
     let vertex_bytes = unsafe {
         std::slice::from_raw_parts(
@@ -245,26 +282,43 @@ fn depth_test_and_blend_with_indexed_draws() {
             .expect("falha ao obter a render target view");
         context.set_render_target_with_depth(color_view, &depth_view);
         context.clear_render_target(color_view, background);
-        context.clear_depth(&depth_view, 1.0);
-        context.set_viewport(Viewport::full(800.0, 600.0));
-        context.set_depth_stencil_state(&depth_state);
+        context
+            .clear_depth(&depth_view, 1.0)
+            .expect("invalid depth clear");
+        context
+            .set_viewport(Viewport::full(800.0, 600.0))
+            .expect("invalid viewport");
         context.set_pipeline(&pipeline);
-        context.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32);
-        context.set_index_buffer(&index_buffer, IndexFormat::Uint16);
+        context
+            .set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32)
+            .expect("invalid vertex buffer binding");
+        context
+            .set_index_buffer(&index_buffer, IndexFormat::Uint16)
+            .expect("invalid index buffer binding");
 
         // Os dois triângulos opacos: a ordem de desenho não deveria
         // importar, porque é o depth test que decide o que fica visível.
         context.set_blend_state(&opaque_blend);
-        context.draw_indexed(3, 0, 0); // vermelho, longe
-        context.draw_indexed(3, 3, 0); // verde, perto — deve "ganhar"
+        context
+            .draw_indexed(3, 0, 0)
+            .expect("indexed draw out of bounds"); // vermelho, longe
+        context
+            .draw_indexed(3, 3, 0)
+            .expect("indexed draw out of bounds"); // verde, perto - deve "ganhar"
 
         // O quad semi-transparente por cima, via blend em vez de
         // substituição direta.
         context.set_blend_state(&alpha_blend);
-        context.draw_indexed(6, 6, 0);
+        context
+            .draw_indexed(6, 6, 0)
+            .expect("indexed draw out of bounds");
 
         if i == 19 {
-            last_capture = Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+            last_capture = Some(
+                swapchain
+                    .capture_frame(&device)
+                    .expect("falha ao capturar o quadro"),
+            );
         }
 
         swapchain.present().expect("falha ao apresentar");

@@ -13,8 +13,8 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    MSG, PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, MSG,
+    PM_REMOVE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 
 use ndl_math::{Mat4, Vec3};
@@ -177,9 +177,18 @@ fn constant_buffer_ring_and_resource_labels() {
         .expect("falha ao criar pipeline");
 
     let vertices = [
-        Vertex { position: [0.0, 0.5], color: [1.0, 0.5, 0.0] },
-        Vertex { position: [0.5, -0.5], color: [0.0, 0.5, 1.0] },
-        Vertex { position: [-0.5, -0.5], color: [0.5, 1.0, 0.0] },
+        Vertex {
+            position: [0.0, 0.5],
+            color: [1.0, 0.5, 0.0],
+        },
+        Vertex {
+            position: [0.5, -0.5],
+            color: [0.0, 0.5, 1.0],
+        },
+        Vertex {
+            position: [-0.5, -0.5],
+            color: [0.5, 1.0, 0.0],
+        },
     ];
     let vertex_bytes = unsafe {
         std::slice::from_raw_parts(
@@ -205,8 +214,8 @@ fn constant_buffer_ring_and_resource_labels() {
     vertex_buffer.set_label("ndl-render-test-triangle-vertices");
 
     // O ring: 2 constant buffers, girando a cada escrita.
-    let mut transform_ring = ConstantBufferRing::new(&device, 64, 2)
-        .expect("falha ao criar o constant buffer ring");
+    let mut transform_ring =
+        ConstantBufferRing::new(&device, 64, 2).expect("falha ao criar o constant buffer ring");
 
     let context = device.context();
     let background = [0.05, 0.05, 0.08, 1.0];
@@ -227,17 +236,26 @@ fn constant_buffer_ring_and_resource_labels() {
             .expect("falha ao obter a render target view");
         context.set_render_target(view);
         context.clear_render_target(view, background);
-        context.set_viewport(Viewport::full(800.0, 600.0));
+        context
+            .set_viewport(Viewport::full(800.0, 600.0))
+            .expect("invalid viewport");
         context.set_pipeline(&pipeline);
-        context.set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32);
-        context.set_constant_buffer(0, transform_buffer);
-        context.draw(3, 0);
+        context
+            .set_vertex_buffer(0, &vertex_buffer, std::mem::size_of::<Vertex>() as u32)
+            .expect("invalid vertex buffer binding");
+        context
+            .set_constant_buffer(0, transform_buffer)
+            .expect("invalid constant buffer binding");
+        context.draw(3, 0).expect("invalid vertex draw");
 
         // No quadro 0, scale = 0.5 (sin(0) = 0) — captura aqui porque dá
         // pra calcular de antemão onde o triângulo cai na tela.
         if frame == 0 {
-            first_frame_capture =
-                Some(swapchain.capture_frame(&device).expect("falha ao capturar o quadro"));
+            first_frame_capture = Some(
+                swapchain
+                    .capture_frame(&device)
+                    .expect("falha ao capturar o quadro"),
+            );
         }
 
         swapchain.present().expect("falha ao apresentar");

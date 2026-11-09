@@ -21,7 +21,9 @@ pub enum TouchPhase {
 pub enum WindowEvent {
     Resized(LogicalSize<u32>),
     Moved(PhysicalPosition<i32>),
-    ScaleFactorChanged { scale_factor: f64 },
+    ScaleFactorChanged {
+        scale_factor: f64,
+    },
     RedrawRequested,
     CloseRequested,
     Focused(bool),
@@ -97,8 +99,14 @@ pub enum DeviceEvent {
 /// próprios podem usar `Event<()>`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event<T = ()> {
-    Window { window_id: WindowId, event: WindowEvent },
-    Device { device_id: DeviceId, event: DeviceEvent },
+    Window {
+        window_id: WindowId,
+        event: WindowEvent,
+    },
+    Device {
+        device_id: DeviceId,
+        event: DeviceEvent,
+    },
     App(AppEvent),
     User(T),
 }

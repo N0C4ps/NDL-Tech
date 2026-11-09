@@ -15,10 +15,9 @@
 //!
 //! ## Estado atual
 //!
-//! Esta é a fase de **reserva de arquitetura**: cada módulo abaixo existe
-//! com a responsabilidade documentada e os tipos/métodos planejados, mas a
-//! implementação real (começando pelo backend Direct3D) ainda está por
-//! vir. Nenhum destes módulos é funcional ainda.
+//! O backend Direct3D 11 possui implementação funcional para o subconjunto
+//! documentado em cada módulo. Recursos ainda não implementados retornam
+//! erros tipados; a API portátil continua sendo ampliada gradualmente.
 //!
 //! ## Convenções planejadas de operadores e traits
 //!
@@ -42,33 +41,33 @@
 
 pub mod core;
 
-pub mod context;
 pub mod command;
+pub mod context;
 pub mod queue;
 
 pub mod surface;
 
-pub mod resource;
-pub mod memory;
 pub mod buffer;
+pub mod memory;
+pub mod resource;
 pub mod texture;
 pub mod view;
 
-pub mod shader;
-pub mod pipeline;
-pub mod input;
-pub mod raster;
 pub mod blend;
 pub mod depth_stencil;
+pub mod input;
+pub mod pipeline;
+pub mod raster;
 pub mod sampler;
+pub mod shader;
 
-pub mod render;
 pub mod compute;
+pub mod render;
 pub mod transfer;
 
-pub mod query;
-pub mod sync;
 pub mod debug;
 pub mod format;
+pub mod query;
+pub mod sync;
 
 mod backend;

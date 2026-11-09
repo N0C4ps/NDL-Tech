@@ -5,44 +5,49 @@
 //! pipeline, ...) ainda não tem contrapartida aqui — isso vai sendo
 //! adicionado módulo a módulo.
 
-use windows::Win32::Graphics::Direct3D::{
-    D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL,
-    D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
-    D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_3,
-};
 use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D::ID3DBlob;
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL,
+    D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_3, D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1,
+    D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Buffer, ID3D11CommandList, ID3D11Device, ID3D11DepthStencilState,
-    ID3D11DepthStencilView, ID3D11DeviceContext, ID3D11InputLayout, ID3D11PixelShader,
-    ID3D11Query, ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView,
-    ID3D11Texture2D, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_DEPTH_STENCIL,
-    D3D11_BIND_FLAG, D3D11_BIND_INDEX_BUFFER, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_VERTEX_BUFFER,
+    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_DEPTH_STENCIL, D3D11_BIND_FLAG, D3D11_BIND_INDEX_BUFFER,
+    D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS, D3D11_BIND_VERTEX_BUFFER,
     D3D11_BUFFER_DESC, D3D11_COMPARISON_ALWAYS, D3D11_COMPARISON_EQUAL, D3D11_COMPARISON_FUNC,
     D3D11_COMPARISON_GREATER, D3D11_COMPARISON_GREATER_EQUAL, D3D11_COMPARISON_LESS,
     D3D11_COMPARISON_LESS_EQUAL, D3D11_COMPARISON_NEVER, D3D11_COMPARISON_NOT_EQUAL,
     D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_DEBUG,
     D3D11_CREATE_DEVICE_FLAG, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_WRITE_MASK_ALL,
-    D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT,
-    D3D11_BIND_UNORDERED_ACCESS, D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_WRITE_DISCARD, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
+    D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_FEATURE_D3D10_X_HARDWARE_OPTIONS,
+    D3D11_FEATURE_D3D11_OPTIONS, D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS,
+    D3D11_FEATURE_DATA_D3D11_OPTIONS, D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+    D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA,
+    D3D11_MAP_WRITE_DISCARD, D3D11_MAPPED_SUBRESOURCE, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
     D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, D3D11_SAMPLER_DESC, D3D11_SDK_VERSION,
-    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_TEXTURE_ADDRESS_CLAMP,
-    D3D11_TEXTURE_ADDRESS_MIRROR, D3D11_TEXTURE_ADDRESS_WRAP, D3D11_USAGE_DEFAULT,
-    D3D11_USAGE_DYNAMIC,
+    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_MIRROR,
+    D3D11_TEXTURE_ADDRESS_WRAP, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_DYNAMIC,
+    D3D11CreateDevice, ID3D11Buffer, ID3D11CommandList, ID3D11DepthStencilState,
+    ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout,
+    ID3D11PixelShader, ID3D11Query, ID3D11RasterizerState, ID3D11RenderTargetView,
+    ID3D11SamplerState, ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader,
 };
-use windows::core::PCSTR;
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, IDXGIDevice, IDXGIFactory1, IDXGIFactory2, IDXGISwapChain1,
-    DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
-    DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT,
+    CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_PRESENT, DXGI_SCALING_STRETCH,
+    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD,
+    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGIFactory1, IDXGIFactory2, IDXGISwapChain1,
 };
 use windows::core::Interface;
+use windows::core::PCSTR;
 
-use crate::core::{AdapterInfo, Device, DeviceDescriptor, FeatureLevel, GraphicsError};
+use crate::core::{
+    AdapterInfo, CapabilitySource, Device, DeviceCapabilities, DeviceDescriptor, DeviceLimits,
+    FeatureSupport, GraphicsError, LimitsSource,
+};
 use crate::surface::{PresentMode, PresentResult, Surface, SwapchainDescriptor};
 
 /// Dispositivo D3D11 já criado: o device, o contexto imediato e o nível
@@ -55,15 +60,138 @@ pub(crate) struct RawDevice {
     pub(crate) feature_level: D3D_FEATURE_LEVEL,
 }
 
-pub(crate) fn map_feature_level(level: D3D_FEATURE_LEVEL) -> FeatureLevel {
-    match level {
-        D3D_FEATURE_LEVEL_11_1 => FeatureLevel::Level11_1,
-        D3D_FEATURE_LEVEL_11_0 => FeatureLevel::Level11_0,
-        D3D_FEATURE_LEVEL_10_1 => FeatureLevel::Level10_1,
-        D3D_FEATURE_LEVEL_10_0 => FeatureLevel::Level10_0,
-        D3D_FEATURE_LEVEL_9_3 => FeatureLevel::Level9_3,
-        D3D_FEATURE_LEVEL_9_2 => FeatureLevel::Level9_2,
-        _ => FeatureLevel::Level9_1,
+/// Traduz o nivel D3D11 para capacidades portaveis e limites garantidos.
+/// A conversao permanece dentro deste modulo para nao expor Feature Level
+/// na API publica do renderer.
+pub(crate) fn device_properties(
+    raw: &RawDevice,
+) -> (DeviceCapabilities, DeviceLimits, LimitsSource) {
+    let (supports_tessellation, mut limits) = match raw.feature_level {
+        D3D_FEATURE_LEVEL_11_1 => (
+            true,
+            d3d11_limits(16384, 2048, 8, 16, 8, 16384, 65535, 128, 32),
+        ),
+        D3D_FEATURE_LEVEL_11_0 => (
+            true,
+            d3d11_limits(16384, 2048, 8, 16, 8, 16384, 65535, 128, 32),
+        ),
+        D3D_FEATURE_LEVEL_10_1 | D3D_FEATURE_LEVEL_10_0 => (
+            false,
+            d3d11_limits(8192, 2048, 8, 16, 1, 8192, 65535, 128, 16),
+        ),
+        D3D_FEATURE_LEVEL_9_3 => (false, d3d11_limits(4096, 256, 4, 16, 0, 4096, 0, 16, 16)),
+        D3D_FEATURE_LEVEL_9_2 => (false, d3d11_limits(2048, 256, 1, 2, 0, 2048, 0, 16, 16)),
+        _ => (false, d3d11_limits(2048, 256, 1, 2, 0, 2048, 0, 16, 16)),
+    };
+
+    let compute = query_compute_support(raw);
+    if !compute.supported {
+        limits.max_storage_buffer_bindings = 0;
+        limits.max_compute_workgroups_per_dimension = 0;
+    }
+    let logic_ops = query_logic_op_support(raw);
+
+    (
+        DeviceCapabilities {
+            compute,
+            tessellation: FeatureSupport {
+                supported: supports_tessellation,
+                source: CapabilitySource::ApiGuarantee,
+            },
+            logic_ops,
+        },
+        limits,
+        LimitsSource::ApiGuarantee,
+    )
+}
+
+fn query_logic_op_support(raw: &RawDevice) -> FeatureSupport {
+    let mut options = D3D11_FEATURE_DATA_D3D11_OPTIONS::default();
+    let query = unsafe {
+        raw.device.CheckFeatureSupport(
+            D3D11_FEATURE_D3D11_OPTIONS,
+            (&mut options as *mut D3D11_FEATURE_DATA_D3D11_OPTIONS).cast(),
+            std::mem::size_of::<D3D11_FEATURE_DATA_D3D11_OPTIONS>() as u32,
+        )
+    };
+
+    match query {
+        Ok(()) => FeatureSupport {
+            supported: options.OutputMergerLogicOp.as_bool(),
+            source: CapabilitySource::DeviceQuery,
+        },
+        Err(_) if raw.feature_level == D3D_FEATURE_LEVEL_11_1 => FeatureSupport {
+            supported: true,
+            source: CapabilitySource::ApiGuarantee,
+        },
+        Err(_) => FeatureSupport {
+            supported: false,
+            source: CapabilitySource::ConservativeFallback,
+        },
+    }
+}
+
+fn query_compute_support(raw: &RawDevice) -> FeatureSupport {
+    if raw.feature_level == D3D_FEATURE_LEVEL_11_1 || raw.feature_level == D3D_FEATURE_LEVEL_11_0 {
+        return FeatureSupport {
+            supported: true,
+            source: CapabilitySource::ApiGuarantee,
+        };
+    }
+
+    if raw.feature_level == D3D_FEATURE_LEVEL_10_0 || raw.feature_level == D3D_FEATURE_LEVEL_10_1 {
+        let mut options = D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS::default();
+        let query = unsafe {
+            raw.device.CheckFeatureSupport(
+                D3D11_FEATURE_D3D10_X_HARDWARE_OPTIONS,
+                (&mut options as *mut D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS).cast(),
+                std::mem::size_of::<D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS>() as u32,
+            )
+        };
+        return match query {
+            Ok(()) => FeatureSupport {
+                supported: options
+                    .ComputeShaders_Plus_RawAndStructuredBuffers_Via_Shader_4_x
+                    .as_bool(),
+                source: CapabilitySource::DeviceQuery,
+            },
+            Err(_) => FeatureSupport {
+                supported: false,
+                source: CapabilitySource::ConservativeFallback,
+            },
+        };
+    }
+
+    FeatureSupport {
+        supported: false,
+        source: CapabilitySource::ApiGuarantee,
+    }
+}
+
+fn d3d11_limits(
+    max_texture_dimension_2d: u32,
+    max_texture_dimension_3d: u32,
+    max_color_attachments: u32,
+    max_sampler_anisotropy: u32,
+    max_storage_buffer_bindings: u32,
+    max_viewport_dimension: u32,
+    max_compute_workgroups_per_dimension: u32,
+    max_sampled_resource_bindings: u32,
+    max_vertex_buffer_bindings: u32,
+) -> DeviceLimits {
+    DeviceLimits {
+        max_buffer_size: u32::MAX as u64,
+        max_texture_dimension_2d,
+        max_texture_dimension_3d,
+        max_color_attachments,
+        max_sampler_anisotropy,
+        max_storage_buffer_bindings,
+        max_uniform_buffer_bindings: 14,
+        max_sampled_resource_bindings,
+        max_sampler_bindings: 16,
+        max_vertex_buffer_bindings,
+        max_viewport_dimension,
+        max_compute_workgroups_per_dimension,
     }
 }
 
@@ -140,7 +268,11 @@ pub(crate) fn enumerate_adapters() -> Result<Vec<AdapterInfo>, GraphicsError> {
             Err(_) => continue,
         };
 
-        let name_len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
+        let name_len = desc
+            .Description
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(desc.Description.len());
         let name = String::from_utf16_lossy(&desc.Description[..name_len]);
         let is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0;
 
@@ -151,10 +283,94 @@ pub(crate) fn enumerate_adapters() -> Result<Vec<AdapterInfo>, GraphicsError> {
             dedicated_video_memory: desc.DedicatedVideoMemory as u64,
             shared_system_memory: desc.SharedSystemMemory as u64,
             is_software,
+            device_type: if is_software {
+                crate::core::AdapterType::Software
+            } else {
+                crate::core::AdapterType::Hardware
+            },
+            driver_version: unsafe { adapter.CheckInterfaceSupport(&ID3D11Device::IID) }
+                .ok()
+                .map(format_driver_version),
         });
     }
 
     Ok(adapters)
+}
+
+pub(crate) fn adapter_info_for_device(raw: &RawDevice) -> Result<AdapterInfo, GraphicsError> {
+    use windows::Win32::Graphics::Dxgi::{IDXGIAdapter1, IDXGIDevice};
+    let dxgi_device: IDXGIDevice = raw
+        .device
+        .cast()
+        .map_err(|e| GraphicsError::Backend(e.to_string()))?;
+    let adapter =
+        unsafe { dxgi_device.GetAdapter() }.map_err(|e| GraphicsError::Backend(e.to_string()))?;
+    let adapter1: IDXGIAdapter1 = adapter
+        .cast()
+        .map_err(|e| GraphicsError::Backend(e.to_string()))?;
+    let desc = unsafe { adapter1.GetDesc1() }.map_err(|e| GraphicsError::Backend(e.to_string()))?;
+    let name_len = desc
+        .Description
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(desc.Description.len());
+    let is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0;
+    Ok(AdapterInfo {
+        name: String::from_utf16_lossy(&desc.Description[..name_len]),
+        vendor_id: desc.VendorId,
+        device_id: desc.DeviceId,
+        dedicated_video_memory: desc.DedicatedVideoMemory as u64,
+        shared_system_memory: desc.SharedSystemMemory as u64,
+        is_software,
+        device_type: if is_software {
+            crate::core::AdapterType::Software
+        } else {
+            crate::core::AdapterType::Hardware
+        },
+        driver_version: unsafe { adapter1.CheckInterfaceSupport(&ID3D11Device::IID) }
+            .ok()
+            .map(format_driver_version),
+    })
+}
+
+fn format_driver_version(version: i64) -> String {
+    let v = version as u64;
+    format!(
+        "{}.{}.{}.{}",
+        v >> 48,
+        (v >> 32) & 0xffff,
+        (v >> 16) & 0xffff,
+        v & 0xffff
+    )
+}
+
+pub(crate) fn query_format_features(
+    device: &Device,
+    format: crate::format::Format,
+) -> Result<crate::core::FormatFeatures, GraphicsError> {
+    use windows::Win32::Graphics::Direct3D11::{
+        D3D11_FORMAT_SUPPORT_DEPTH_STENCIL, D3D11_FORMAT_SUPPORT_IA_VERTEX_BUFFER,
+        D3D11_FORMAT_SUPPORT_RENDER_TARGET, D3D11_FORMAT_SUPPORT_SHADER_SAMPLE,
+        D3D11_FORMAT_SUPPORT_TEXTURE2D, D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW,
+    };
+    let dxgi = format
+        .to_dxgi_format()
+        .ok_or_else(|| GraphicsError::FeatureNotSupported {
+            feature: format!("formato {format:?} sem mapeamento neste backend"),
+        })?;
+    let mask = unsafe { device.raw.device.CheckFormatSupport(dxgi) }
+        .map_err(|e| GraphicsError::Backend(e.to_string()))?;
+    let has = |flag: windows::Win32::Graphics::Direct3D11::D3D11_FORMAT_SUPPORT| {
+        mask & flag.0 as u32 != 0
+    };
+    Ok(crate::core::FormatFeatures {
+        texture_2d: has(D3D11_FORMAT_SUPPORT_TEXTURE2D),
+        sampled: has(D3D11_FORMAT_SUPPORT_SHADER_SAMPLE),
+        render_target: has(D3D11_FORMAT_SUPPORT_RENDER_TARGET),
+        depth_stencil: has(D3D11_FORMAT_SUPPORT_DEPTH_STENCIL),
+        vertex_buffer: has(D3D11_FORMAT_SUPPORT_IA_VERTEX_BUFFER),
+        storage: has(D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW),
+    })
 }
 
 fn bind_flag_for_usage(usage: crate::buffer::BufferUsage) -> D3D11_BIND_FLAG {
@@ -235,7 +451,11 @@ pub(crate) fn create_buffer(
         .ok_or_else(|| GraphicsError::Backend("CreateBuffer não retornou um buffer".into()))?;
 
     Ok(crate::buffer::Buffer::from_raw(
-        buffer, desc.size, desc.usage, desc.stride,
+        buffer,
+        desc.size,
+        desc.usage,
+        desc.stride,
+        desc.dynamic,
     ))
 }
 
@@ -244,9 +464,8 @@ pub(crate) fn create_unordered_access_view(
     buffer: &crate::buffer::Buffer,
 ) -> Result<crate::view::UnorderedAccessView, GraphicsError> {
     use windows::Win32::Graphics::Direct3D11::{
-        ID3D11UnorderedAccessView, D3D11_UAV_DIMENSION_BUFFER,
-        D3D11_UNORDERED_ACCESS_VIEW_DESC, D3D11_UNORDERED_ACCESS_VIEW_DESC_0,
-        D3D11_BUFFER_UAV,
+        D3D11_BUFFER_UAV, D3D11_UAV_DIMENSION_BUFFER, D3D11_UNORDERED_ACCESS_VIEW_DESC,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC_0, ID3D11UnorderedAccessView,
     };
 
     let num_elements = (buffer.size() / buffer.stride().max(1) as u64) as u32;
@@ -334,8 +553,8 @@ pub(crate) fn compile_hlsl(
         return Err(GraphicsError::Backend(message));
     }
 
-    let code = code
-        .ok_or_else(|| GraphicsError::Backend("D3DCompile não retornou bytecode".into()))?;
+    let code =
+        code.ok_or_else(|| GraphicsError::Backend("D3DCompile não retornou bytecode".into()))?;
     Ok(blob_to_bytes(&code))
 }
 
@@ -384,9 +603,8 @@ pub(crate) fn create_pixel_shader(
             .CreatePixelShader(bytecode, None, Some(&mut shader))
     }
     .map_err(|err| GraphicsError::Backend(err.to_string()))?;
-    let shader = shader.ok_or_else(|| {
-        GraphicsError::Backend("CreatePixelShader não retornou um shader".into())
-    })?;
+    let shader = shader
+        .ok_or_else(|| GraphicsError::Backend("CreatePixelShader não retornou um shader".into()))?;
     Ok(crate::shader::PixelShader { raw: shader })
 }
 
@@ -421,11 +639,10 @@ pub(crate) fn create_input_layout(
 
     let mut layout: Option<ID3D11InputLayout> = None;
     unsafe {
-        device.raw.device.CreateInputLayout(
-            &descs,
-            &vertex_shader.bytecode,
-            Some(&mut layout),
-        )
+        device
+            .raw
+            .device
+            .CreateInputLayout(&descs, &vertex_shader.bytecode, Some(&mut layout))
     }
     .map_err(|err| GraphicsError::Backend(err.to_string()))?;
 
@@ -466,9 +683,13 @@ pub(crate) fn map_write_discard<'a>(
 ) -> Result<crate::memory::MappedBuffer<'a>, GraphicsError> {
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
     unsafe {
-        context
-            .raw
-            .Map(&buffer.raw, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut mapped))
+        context.raw.Map(
+            &buffer.raw,
+            0,
+            D3D11_MAP_WRITE_DISCARD,
+            0,
+            Some(&mut mapped),
+        )
     }
     .map_err(|err| GraphicsError::Backend(err.to_string()))?;
 
@@ -512,15 +733,20 @@ pub(crate) fn create_command_encoder(
     device: &Device,
 ) -> Result<crate::command::CommandEncoder, GraphicsError> {
     let mut deferred: Option<ID3D11DeviceContext> = None;
-    unsafe { device.raw.device.CreateDeferredContext(0, Some(&mut deferred)) }
-        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateDeferredContext(0, Some(&mut deferred))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
 
     let deferred = deferred.ok_or_else(|| {
         GraphicsError::Backend("CreateDeferredContext não retornou um contexto".into())
     })?;
 
     Ok(crate::command::CommandEncoder::from_context(
-        crate::context::Context::from_raw(deferred),
+        crate::context::Context::from_raw(deferred, device.limits()),
     ))
 }
 
@@ -528,8 +754,12 @@ pub(crate) fn finish_command_list(
     context: &crate::context::Context,
 ) -> Result<crate::command::CommandBuffer, GraphicsError> {
     let mut command_list: Option<ID3D11CommandList> = None;
-    unsafe { context.raw.FinishCommandList(false, Some(&mut command_list)) }
-        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    unsafe {
+        context
+            .raw
+            .FinishCommandList(false, Some(&mut command_list))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
 
     let command_list = command_list.ok_or_else(|| {
         GraphicsError::Backend("FinishCommandList não retornou uma lista de comandos".into())
@@ -602,7 +832,8 @@ pub(crate) fn create_query(
     let mut query: Option<ID3D11Query> = None;
     unsafe { device.raw.device.CreateQuery(&query_desc, Some(&mut query)) }
         .map_err(|err| GraphicsError::Backend(err.to_string()))?;
-    let query = query.ok_or_else(|| GraphicsError::Backend("CreateQuery não retornou uma query".into()))?;
+    let query =
+        query.ok_or_else(|| GraphicsError::Backend("CreateQuery não retornou uma query".into()))?;
 
     Ok(crate::query::Query { raw: query, kind })
 }
@@ -612,7 +843,10 @@ pub(crate) fn create_query(
 /// consulta o estado atual.
 const ASYNC_GETDATA_DONOTFLUSH: u32 = 1;
 
-pub(crate) fn is_query_ready(context: &crate::context::Context, query: &crate::query::Query) -> bool {
+pub(crate) fn is_query_ready(
+    context: &crate::context::Context,
+    query: &crate::query::Query,
+) -> bool {
     let mut result = windows::Win32::Foundation::BOOL(0);
     let got_data = unsafe {
         context.raw.GetData(
@@ -638,11 +872,7 @@ pub(crate) fn get_occlusion_result(
             ASYNC_GETDATA_DONOTFLUSH,
         )
     };
-    if got_data.is_ok() {
-        Some(result)
-    } else {
-        None
-    }
+    if got_data.is_ok() { Some(result) } else { None }
 }
 
 fn user_defined_annotation(
@@ -718,19 +948,17 @@ pub(crate) fn create_blend_state(
     device: &Device,
     desc: &crate::blend::BlendStateDescriptor,
 ) -> Result<crate::blend::BlendState, GraphicsError> {
-    use windows::Win32::Graphics::Direct3D11::{
-        D3D11_BLEND_DESC, D3D11_COLOR_WRITE_ENABLE_ALL, D3D11_RENDER_TARGET_BLEND_DESC,
-    };
+    use windows::Win32::Graphics::Direct3D11::{D3D11_BLEND_DESC, D3D11_RENDER_TARGET_BLEND_DESC};
 
     let render_target = D3D11_RENDER_TARGET_BLEND_DESC {
         BlendEnable: desc.enabled.into(),
         SrcBlend: blend_factor_to_d3d(desc.src_factor),
         DestBlend: blend_factor_to_d3d(desc.dst_factor),
         BlendOp: blend_op_to_d3d(desc.op),
-        SrcBlendAlpha: blend_factor_to_d3d(desc.src_factor),
-        DestBlendAlpha: blend_factor_to_d3d(desc.dst_factor),
-        BlendOpAlpha: blend_op_to_d3d(desc.op),
-        RenderTargetWriteMask: D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
+        SrcBlendAlpha: blend_factor_to_d3d(desc.src_alpha_factor),
+        DestBlendAlpha: blend_factor_to_d3d(desc.dst_alpha_factor),
+        BlendOpAlpha: blend_op_to_d3d(desc.alpha_op),
+        RenderTargetWriteMask: desc.write_mask.0,
     };
 
     let mut blend_desc = D3D11_BLEND_DESC::default();
@@ -751,6 +979,48 @@ pub(crate) fn create_blend_state(
     Ok(crate::blend::BlendState { raw: state })
 }
 
+pub(crate) fn create_rasterizer_state(
+    device: &Device,
+    desc: &crate::raster::RasterizerStateDescriptor,
+) -> Result<crate::raster::RasterizerState, GraphicsError> {
+    use crate::raster::{CullMode, FillMode, FrontFace};
+    use windows::Win32::Graphics::Direct3D11::{
+        D3D11_CULL_BACK, D3D11_CULL_FRONT, D3D11_CULL_NONE, D3D11_FILL_SOLID, D3D11_FILL_WIREFRAME,
+        D3D11_RASTERIZER_DESC,
+    };
+    let native = D3D11_RASTERIZER_DESC {
+        FillMode: match desc.fill_mode {
+            FillMode::Solid => D3D11_FILL_SOLID,
+            FillMode::Wireframe => D3D11_FILL_WIREFRAME,
+        },
+        CullMode: match desc.cull_mode {
+            CullMode::None => D3D11_CULL_NONE,
+            CullMode::Front => D3D11_CULL_FRONT,
+            CullMode::Back => D3D11_CULL_BACK,
+        },
+        FrontCounterClockwise: matches!(desc.front_face, FrontFace::CounterClockwise).into(),
+        DepthBias: desc.depth_bias,
+        DepthBiasClamp: desc.depth_bias_clamp,
+        SlopeScaledDepthBias: desc.slope_scaled_depth_bias,
+        DepthClipEnable: desc.depth_clip_enabled.into(),
+        ScissorEnable: false.into(),
+        MultisampleEnable: false.into(),
+        AntialiasedLineEnable: false.into(),
+    };
+    let mut state: Option<ID3D11RasterizerState> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateRasterizerState(&native, Some(&mut state))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let raw = state.ok_or_else(|| {
+        GraphicsError::Backend("CreateRasterizerState não retornou um estado".into())
+    })?;
+    Ok(crate::raster::RasterizerState { raw })
+}
+
 fn compare_op_to_d3d(op: crate::depth_stencil::CompareOp) -> D3D11_COMPARISON_FUNC {
     use crate::depth_stencil::CompareOp::*;
     match op {
@@ -762,6 +1032,34 @@ fn compare_op_to_d3d(op: crate::depth_stencil::CompareOp) -> D3D11_COMPARISON_FU
         NotEqual => D3D11_COMPARISON_NOT_EQUAL,
         GreaterEqual => D3D11_COMPARISON_GREATER_EQUAL,
         Always => D3D11_COMPARISON_ALWAYS,
+    }
+}
+
+fn stencil_op_to_d3d(
+    op: crate::depth_stencil::StencilOp,
+) -> windows::Win32::Graphics::Direct3D11::D3D11_STENCIL_OP {
+    use crate::depth_stencil::StencilOp::*;
+    use windows::Win32::Graphics::Direct3D11::*;
+    match op {
+        Keep => D3D11_STENCIL_OP_KEEP,
+        Zero => D3D11_STENCIL_OP_ZERO,
+        Replace => D3D11_STENCIL_OP_REPLACE,
+        IncrementClamp => D3D11_STENCIL_OP_INCR_SAT,
+        DecrementClamp => D3D11_STENCIL_OP_DECR_SAT,
+        Invert => D3D11_STENCIL_OP_INVERT,
+        IncrementWrap => D3D11_STENCIL_OP_INCR,
+        DecrementWrap => D3D11_STENCIL_OP_DECR,
+    }
+}
+
+fn stencil_face_to_d3d(
+    desc: crate::depth_stencil::StencilFaceDescriptor,
+) -> windows::Win32::Graphics::Direct3D11::D3D11_DEPTH_STENCILOP_DESC {
+    windows::Win32::Graphics::Direct3D11::D3D11_DEPTH_STENCILOP_DESC {
+        StencilFailOp: stencil_op_to_d3d(desc.fail_op),
+        StencilDepthFailOp: stencil_op_to_d3d(desc.depth_fail_op),
+        StencilPassOp: stencil_op_to_d3d(desc.pass_op),
+        StencilFunc: compare_op_to_d3d(desc.compare),
     }
 }
 
@@ -777,7 +1075,11 @@ pub(crate) fn create_depth_stencil_state(
             D3D11_DEPTH_WRITE_MASK_ZERO
         },
         DepthFunc: compare_op_to_d3d(desc.depth_compare),
-        StencilEnable: false.into(),
+        StencilEnable: desc.stencil_test_enabled.into(),
+        StencilReadMask: desc.stencil_read_mask,
+        StencilWriteMask: desc.stencil_write_mask,
+        FrontFace: stencil_face_to_d3d(desc.front_face),
+        BackFace: stencil_face_to_d3d(desc.back_face),
         ..Default::default()
     };
 
@@ -803,9 +1105,9 @@ pub(crate) fn create_depth_stencil_view(
     height: u32,
     format: crate::format::Format,
 ) -> Result<crate::view::DepthStencilView, GraphicsError> {
-    let dxgi_format = format
-        .to_dxgi_format()
-        .ok_or(GraphicsError::Unsupported("formato não suportado para depth buffer"))?;
+    let dxgi_format = format.to_dxgi_format().ok_or(GraphicsError::Unsupported(
+        "formato não suportado para depth buffer",
+    ))?;
 
     let texture_desc = D3D11_TEXTURE2D_DESC {
         Width: width,
@@ -847,7 +1149,9 @@ pub(crate) fn create_depth_stencil_view(
         GraphicsError::Backend("CreateDepthStencilView não retornou uma view".into())
     })?;
 
-    Ok(crate::view::DepthStencilView::from_raw(view))
+    Ok(crate::view::DepthStencilView::from_raw(
+        view, format, width, height,
+    ))
 }
 
 pub(crate) fn create_texture_2d(
@@ -858,7 +1162,9 @@ pub(crate) fn create_texture_2d(
     let format = desc
         .format
         .to_dxgi_format()
-        .ok_or(GraphicsError::Unsupported("formato não suportado para textura"))?;
+        .ok_or(GraphicsError::Unsupported(
+            "formato não suportado para textura",
+        ))?;
 
     let texture_desc = D3D11_TEXTURE2D_DESC {
         Width: desc.width,
@@ -961,8 +1267,9 @@ pub(crate) fn create_sampler(
     }
     .map_err(|err| GraphicsError::Backend(err.to_string()))?;
 
-    let sampler = sampler
-        .ok_or_else(|| GraphicsError::Backend("CreateSamplerState não retornou um sampler".into()))?;
+    let sampler = sampler.ok_or_else(|| {
+        GraphicsError::Backend("CreateSamplerState não retornou um sampler".into())
+    })?;
 
     Ok(crate::sampler::Sampler { raw: sampler })
 }
@@ -998,13 +1305,15 @@ pub(crate) fn create_swapchain(
         .map_err(|err| GraphicsError::Backend(err.to_string()))?;
     let adapter = unsafe { dxgi_device.GetAdapter() }
         .map_err(|err| GraphicsError::Backend(err.to_string()))?;
-    let factory: IDXGIFactory2 = unsafe { adapter.GetParent() }
-        .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let factory: IDXGIFactory2 =
+        unsafe { adapter.GetParent() }.map_err(|err| GraphicsError::Backend(err.to_string()))?;
 
     let format = desc
         .format
         .to_dxgi_format()
-        .ok_or(GraphicsError::Unsupported("formato não suportado para swapchain"))?;
+        .ok_or(GraphicsError::Unsupported(
+            "formato não suportado para swapchain",
+        ))?;
 
     let swap_chain_desc = DXGI_SWAP_CHAIN_DESC1 {
         Width: desc.size.width,
@@ -1042,8 +1351,16 @@ pub(crate) fn resize_swapchain(
     width: u32,
     height: u32,
 ) -> Result<(), GraphicsError> {
-    unsafe { raw.swapchain.ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG(0)) }
-        .map_err(|err| GraphicsError::Backend(err.to_string()))
+    unsafe {
+        raw.swapchain.ResizeBuffers(
+            0,
+            width,
+            height,
+            DXGI_FORMAT_UNKNOWN,
+            DXGI_SWAP_CHAIN_FLAG(0),
+        )
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))
 }
 
 /// Cria a [`crate::view::RenderTargetView`] do back buffer atual da
@@ -1052,6 +1369,8 @@ pub(crate) fn resize_swapchain(
 pub(crate) fn create_swapchain_render_target_view(
     device: &Device,
     raw: &RawSwapchain,
+    size: crate::surface::Extent2D,
+    format: crate::format::Format,
 ) -> Result<crate::view::RenderTargetView, GraphicsError> {
     let back_buffer: ID3D11Texture2D = unsafe { raw.swapchain.GetBuffer(0) }
         .map_err(|err| GraphicsError::Backend(err.to_string()))?;
@@ -1068,7 +1387,12 @@ pub(crate) fn create_swapchain_render_target_view(
         GraphicsError::Backend("CreateRenderTargetView não retornou uma view".into())
     })?;
 
-    Ok(crate::view::RenderTargetView::from_raw(render_target_view))
+    Ok(crate::view::RenderTargetView::from_raw(
+        render_target_view,
+        format,
+        size.width,
+        size.height,
+    ))
 }
 
 /// Apresenta o quadro atual da swapchain.
@@ -1113,15 +1437,18 @@ pub(crate) fn capture_swapchain_frame(
     }
     .map_err(|err| GraphicsError::Backend(err.to_string()))?;
     let staging = staging.ok_or_else(|| {
-        GraphicsError::Backend("CreateTexture2D (staging de captura) não retornou uma textura".into())
+        GraphicsError::Backend(
+            "CreateTexture2D (staging de captura) não retornou uma textura".into(),
+        )
     })?;
 
     unsafe {
         device.raw.context.CopyResource(&staging, &back_buffer);
     }
 
-    let format = crate::format::Format::from_dxgi_format(desc.Format)
-        .ok_or(GraphicsError::Unsupported("formato do back buffer sem mapeamento conhecido"))?;
+    let format = crate::format::Format::from_dxgi_format(desc.Format).ok_or(
+        GraphicsError::Unsupported("formato do back buffer sem mapeamento conhecido"),
+    )?;
     let bytes_per_pixel = format.bits_per_pixel() / 8;
 
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
@@ -1147,7 +1474,10 @@ pub(crate) fn capture_swapchain_frame(
     Ok((desc.Width, desc.Height, format, pixels))
 }
 
-pub(crate) fn present(raw: &RawSwapchain, present_mode: PresentMode) -> Result<PresentResult, GraphicsError> {
+pub(crate) fn present(
+    raw: &RawSwapchain,
+    present_mode: PresentMode,
+) -> Result<PresentResult, GraphicsError> {
     // VSync por padrão: "liso" numa GPU topo de linha não significa nada
     // numa GPU mais modesta — nunca presumimos Immediate sem o jogo pedir.
     let sync_interval = match present_mode {

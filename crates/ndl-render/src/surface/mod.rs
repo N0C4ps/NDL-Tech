@@ -117,6 +117,29 @@ impl Swapchain {
         surface: &Surface,
         desc: &SwapchainDescriptor,
     ) -> Result<Self, GraphicsError> {
+        if desc.size.width == 0 || desc.size.height == 0 {
+            return Err(GraphicsError::InvalidArgument { name: "SwapchainDescriptor::size", reason: "as dimensões precisam ser maiores que zero; suspenda a apresentação durante minimização".into() });
+        }
+        if !(2..=16).contains(&desc.buffer_count) {
+            return Err(GraphicsError::InvalidArgument {
+                name: "SwapchainDescriptor::buffer_count",
+                reason: "deve estar entre 2 e 16 para a swapchain D3D11 atual".into(),
+            });
+        }
+        if desc.format.is_depth() || desc.format.is_compressed() {
+            return Err(GraphicsError::IncompatibleResource {
+                operation: "create_swapchain",
+                reason:
+                    "o formato precisa ser colorido, não comprimido e utilizável como render target"
+                        .into(),
+            });
+        }
+        let format_features = device.format_features(desc.format)?;
+        if !format_features.render_target {
+            return Err(GraphicsError::FeatureNotSupported {
+                feature: format!("render target de swapchain no formato {:?}", desc.format),
+            });
+        }
         #[cfg(target_os = "windows")]
         {
             let raw = crate::backend::directx::create_swapchain(device, surface, desc)?;
@@ -158,6 +181,9 @@ impl Swapchain {
     /// `WindowEvent::Resized` vindo de `ndl-platform`, repassado pelo
     /// código do jogo).
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), GraphicsError> {
+        if width == 0 || height == 0 {
+            return Err(GraphicsError::InvalidArgument { name: "Swapchain::resize", reason: "dimensões zero não são aplicadas; mantenha a swapchain suspensa enquanto a janela estiver minimizada".into() });
+        }
         // A view antiga aponta para o back buffer anterior — inválida
         // depois do resize, então é descartada e recriada sob demanda.
         self.render_target_view = None;
@@ -172,11 +198,19 @@ impl Swapchain {
 
     /// A [`RenderTargetView`] do back buffer atual, criando-a (e
     /// cacheando) se ainda não existir.
-    pub fn render_target_view(&mut self, device: &Device) -> Result<&RenderTargetView, GraphicsError> {
+    pub fn render_target_view(
+        &mut self,
+        device: &Device,
+    ) -> Result<&RenderTargetView, GraphicsError> {
         if self.render_target_view.is_none() {
             #[cfg(target_os = "windows")]
             {
-                let view = crate::backend::directx::create_swapchain_render_target_view(device, &self.raw)?;
+                let view = crate::backend::directx::create_swapchain_render_target_view(
+                    device,
+                    &self.raw,
+                    self.size,
+                    self.format,
+                )?;
                 self.render_target_view = Some(view);
             }
             #[cfg(not(target_os = "windows"))]
@@ -187,7 +221,10 @@ impl Swapchain {
                 ));
             }
         }
-        Ok(self.render_target_view.as_ref().expect("acabou de ser preenchida"))
+        Ok(self
+            .render_target_view
+            .as_ref()
+            .expect("acabou de ser preenchida"))
     }
 
     /// Apresenta o quadro atual.
@@ -210,7 +247,11 @@ impl Swapchain {
     /// + [`Swapchain::present`] — útil enquanto `render` (passes de desenho
     /// de verdade) ainda não existe. Jogos que precisam desenhar mais do
     /// que uma cor sólida devem usar esses três passos diretamente.
-    pub fn clear_and_present(&mut self, device: &Device, color: [f32; 4]) -> Result<PresentResult, GraphicsError> {
+    pub fn clear_and_present(
+        &mut self,
+        device: &Device,
+        color: [f32; 4],
+    ) -> Result<PresentResult, GraphicsError> {
         let context = device.context();
         let view = self.render_target_view(device)?;
         context.clear_render_target(view, color);
@@ -271,7 +312,12 @@ impl FrameCapture {
     /// bytes BGRA para `Format::Bgra8Unorm`, o formato comum de
     /// swapchain). Entra em pânico se `(x, y)` estiver fora dos limites.
     pub fn pixel(&self, x: u32, y: u32) -> &[u8] {
-        assert!(x < self.width && y < self.height, "pixel ({x}, {y}) fora dos limites ({}, {})", self.width, self.height);
+        assert!(
+            x < self.width && y < self.height,
+            "pixel ({x}, {y}) fora dos limites ({}, {})",
+            self.width,
+            self.height
+        );
         let bytes_per_pixel = (self.format.bits_per_pixel() / 8) as usize;
         let offset = (y as usize * self.width as usize + x as usize) * bytes_per_pixel;
         &self.pixels[offset..offset + bytes_per_pixel]
@@ -283,7 +329,11 @@ impl FrameCapture {
     /// formato não tiver 4 bytes por pixel.
     pub fn pixel_rgba(&self, x: u32, y: u32) -> [u8; 4] {
         let raw = self.pixel(x, y);
-        assert_eq!(raw.len(), 4, "pixel_rgba só funciona com formatos de 4 bytes por pixel");
+        assert_eq!(
+            raw.len(),
+            4,
+            "pixel_rgba só funciona com formatos de 4 bytes por pixel"
+        );
         [raw[2], raw[1], raw[0], raw[3]]
     }
 }

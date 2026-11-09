@@ -90,11 +90,7 @@ impl Format {
     /// Dimensões (largura, altura) do bloco de compressão em texels; `(1, 1)`
     /// para formatos não comprimidos.
     pub fn block_dimensions(self) -> (u32, u32) {
-        if self.is_compressed() {
-            (4, 4)
-        } else {
-            (1, 1)
-        }
+        if self.is_compressed() { (4, 4) } else { (1, 1) }
     }
 
     pub fn bits_per_pixel(self) -> u32 {
@@ -133,7 +129,10 @@ impl Format {
 
     pub fn is_depth(self) -> bool {
         use Format::*;
-        matches!(self, D16Unorm | D24UnormS8Uint | D32Float | D32FloatS8X24Uint)
+        matches!(
+            self,
+            D16Unorm | D24UnormS8Uint | D32Float | D32FloatS8X24Uint
+        )
     }
 
     pub fn is_stencil(self) -> bool {
@@ -142,7 +141,14 @@ impl Format {
     }
 
     pub fn is_srgb(self) -> bool {
-        matches!(self, Format::Rgba8UnormSrgb | Format::Bgra8UnormSrgb | Format::Bc1UnormSrgb | Format::Bc3UnormSrgb | Format::Bc7UnormSrgb)
+        matches!(
+            self,
+            Format::Rgba8UnormSrgb
+                | Format::Bgra8UnormSrgb
+                | Format::Bc1UnormSrgb
+                | Format::Bc3UnormSrgb
+                | Format::Bc7UnormSrgb
+        )
     }
 
     pub fn is_integer(self) -> bool {

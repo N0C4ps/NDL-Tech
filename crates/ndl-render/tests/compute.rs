@@ -57,8 +57,14 @@ fn compute_shader_doubles_each_element() {
 
     let context = device.context();
     context.set_compute_pipeline(&pipeline);
-    context.set_unordered_access_view(0, &uav);
-    context.dispatch(1, 1, 1);
+    context
+        .set_unordered_access_view(0, &uav)
+        .expect("invalid UAV slot");
+    let max_groups = device.limits().max_compute_workgroups_per_dimension;
+    assert!(context.dispatch(max_groups + 1, 1, 1).is_err());
+    context
+        .dispatch(1, 1, 1)
+        .expect("invalid dispatch dimensions");
 
     let staging_buffer = device
         .create_buffer(&BufferDescriptor {
@@ -74,13 +80,13 @@ fn compute_shader_doubles_each_element() {
         .map_read(&staging_buffer)
         .expect("falha ao mapear o buffer de staging para leitura");
     let bytes = mapped.as_slice();
-    let result: &[f32] = unsafe {
-        std::slice::from_raw_parts(bytes.as_ptr() as *const f32, input.len())
-    };
+    let result: &[f32] =
+        unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const f32, input.len()) };
 
     let expected: Vec<f32> = input.iter().map(|x| x * 2.0).collect();
     assert_eq!(
-        result, expected.as_slice(),
+        result,
+        expected.as_slice(),
         "o compute shader deveria ter dobrado cada elemento"
     );
 }

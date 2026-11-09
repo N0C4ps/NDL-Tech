@@ -8,9 +8,9 @@
 //! ## Estado atual
 //!
 //! [`BlendState`] já é real, com os dois presets mais comuns
-//! (`opaque`/`alpha_blend`). Operações lógicas (`LogicOp`), máscara de
-//! escrita de cor e blending independente por render target continuam
-//! reservados.
+//! (`opaque`/`alpha_blend`), fatores/operação separados para alpha e
+//! máscara de escrita de canais. Operações lógicas (`LogicOp`) e blending
+//! independente por render target continuam reservados.
 
 use crate::core::{Device, GraphicsError};
 
@@ -40,6 +40,60 @@ pub enum BlendOp {
     Max,
 }
 
+/// Canais de cor habilitados para escrita no attachment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ColorWriteMask(pub u8);
+
+impl ColorWriteMask {
+    pub const NONE: Self = Self(0);
+    pub const RED: Self = Self(1);
+    pub const GREEN: Self = Self(2);
+    pub const BLUE: Self = Self(4);
+    pub const ALPHA: Self = Self(8);
+    pub const ALL: Self = Self(15);
+}
+
+impl std::ops::BitOr for ColorWriteMask {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for ColorWriteMask {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for ColorWriteMask {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+}
+impl std::ops::BitAndAssign for ColorWriteMask {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
+impl std::ops::BitXor for ColorWriteMask {
+    type Output = Self;
+    fn bitxor(self, rhs: Self) -> Self {
+        Self(self.0 ^ rhs.0)
+    }
+}
+impl std::ops::BitXorAssign for ColorWriteMask {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        self.0 ^= rhs.0;
+    }
+}
+impl std::ops::Not for ColorWriteMask {
+    type Output = Self;
+    fn not(self) -> Self {
+        Self(!self.0 & Self::ALL.0)
+    }
+}
+
 /// Configuração usada para criar um [`BlendState`].
 #[derive(Debug, Clone, Copy)]
 pub struct BlendStateDescriptor {
@@ -47,6 +101,10 @@ pub struct BlendStateDescriptor {
     pub src_factor: BlendFactor,
     pub dst_factor: BlendFactor,
     pub op: BlendOp,
+    pub src_alpha_factor: BlendFactor,
+    pub dst_alpha_factor: BlendFactor,
+    pub alpha_op: BlendOp,
+    pub write_mask: ColorWriteMask,
 }
 
 impl BlendStateDescriptor {
@@ -58,6 +116,10 @@ impl BlendStateDescriptor {
             src_factor: BlendFactor::One,
             dst_factor: BlendFactor::Zero,
             op: BlendOp::Add,
+            src_alpha_factor: BlendFactor::One,
+            dst_alpha_factor: BlendFactor::Zero,
+            alpha_op: BlendOp::Add,
+            write_mask: ColorWriteMask::ALL,
         }
     }
 
@@ -68,6 +130,10 @@ impl BlendStateDescriptor {
             src_factor: BlendFactor::SrcAlpha,
             dst_factor: BlendFactor::OneMinusSrcAlpha,
             op: BlendOp::Add,
+            src_alpha_factor: BlendFactor::One,
+            dst_alpha_factor: BlendFactor::OneMinusSrcAlpha,
+            alpha_op: BlendOp::Add,
+            write_mask: ColorWriteMask::ALL,
         }
     }
 }
@@ -89,6 +155,12 @@ impl Device {
         &self,
         desc: &BlendStateDescriptor,
     ) -> Result<BlendState, GraphicsError> {
+        if desc.write_mask.0 & !ColorWriteMask::ALL.0 != 0 {
+            return Err(GraphicsError::InvalidArgument {
+                name: "BlendStateDescriptor::write_mask",
+                reason: "a máscara só aceita os bits RED, GREEN, BLUE e ALPHA".into(),
+            });
+        }
         #[cfg(target_os = "windows")]
         {
             return crate::backend::directx::create_blend_state(self, desc);
@@ -100,5 +172,18 @@ impl Device {
                 "nenhum backend gráfico implementado para este SO ainda",
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ColorWriteMask;
+
+    #[test]
+    fn channel_masks_compose_and_stay_within_rgba() {
+        let rgb = ColorWriteMask::RED | ColorWriteMask::GREEN | ColorWriteMask::BLUE;
+        assert_eq!(rgb.0, 0b0111);
+        assert_eq!(!rgb, ColorWriteMask::ALPHA);
+        assert_eq!(rgb & ColorWriteMask::GREEN, ColorWriteMask::GREEN);
     }
 }

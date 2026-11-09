@@ -5,45 +5,102 @@
 //! depois pelo contexto imediato. Este módulo abstrai essa distinção sem
 //! prometer o modelo de filas explícitas de APIs mais modernas.
 //!
+//! Cada handle criado por [`crate::core::Device::context`] refere o mesmo contexto imediato e
+//! compartilha um lock de serialização por dispositivo. Cada chamada pública é
+//! serializada individualmente; uma sequência de várias chamadas ainda pode ser
+//! intercalada com outra thread. Para manter uma sequência indivisível, grave-a
+//! num [`crate::command::CommandEncoder`] e submeta a lista pela fila.
+//!
+//! O estado usado pelas validações de bindings pertence ao contexto imediato e
+//! acompanha os binds submetidos por esta crate. Chamadas nativas externas via
+//! escape hatch podem invalidar esse rastreamento; nesse caso, as validações
+//! dependentes dele não garantem o estado real do driver.
+//!
 //! ## Estado atual
 //!
-//! [`Context`] já cobre o essencial pra desenhar com texturas e constant
-//! buffers: `set_render_target`, `clear_render_target`, `flush`,
-//! `set_viewport`, `set_pipeline`, `set_vertex_buffer`,
-//! `set_constant_buffer`, `set_shader_resource`, `set_sampler`,
-//! `update_buffer` e `draw`. O resto do que estava planejado (geometry/
-//! hull/domain shader, output merger com múltiplos alvos, stream output,
-//! consultas, inspeção, e contextos diferidos) continua reservado — ver
-//! tabela abaixo.
+//! [`Context`] oferece comandos de baixo nivel; [`crate::render::RenderPass`]
+//! organiza attachments, operacoes de carga e comandos de desenho. Contextos
+//! diferidos e queries possuem APIs proprias. Permanecem reservados shaders
+//! geometry/hull/domain, multiplos alvos simultaneos, stream output e inspecao.
 //!
-//! | Grupo | Métodos planejados |
+//! | Grupo | Métodos ainda planejados |
 //! |---|---|
-//! | Shader | `set_geometry_shader`, `set_hull_shader`, `set_domain_shader`, `set_compute_shader` |
-//! | Output merger | múltiplos alvos simultâneos, `set_depth_stencil_target`, `set_blend_state`, `set_depth_stencil_state` |
+//! | Shader | `set_geometry_shader`, `set_hull_shader`, `set_domain_shader` |
+//! | Output merger | múltiplos alvos simultâneos, controle separado de depth target |
 //! | Stream output | `set_stream_output_targets`, `reset_stream_output_targets` |
-//! | Consultas | `begin_query`, `end_query`, `get_query_data`, `set_predication` |
-//! | Inspeção | `get_pipeline_state`, `get_bound_resources`, `get_render_targets`, `get_viewports` |
+//! | Consultas | predication e integracao direta de queries ao contexto |
+//! | Inspecao | `get_pipeline_state`, `get_bound_resources`, `get_render_targets`, `get_viewports` |
+//!
+//! Já implementados: `set_blend_state` e `set_depth_stencil_state`, além dos
+//! binds básicos, viewport, clear e draw. Eles não fazem parte da lista de
+//! pendências.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext;
 
 use crate::buffer::Buffer;
+use crate::core::DeviceLimits;
 use crate::pipeline::GraphicsPipeline;
 use crate::raster::Viewport;
 use crate::sampler::Sampler;
 use crate::view::{RenderTargetView, ShaderResourceView};
+
+pub(crate) type VertexBufferBindings = Arc<Mutex<HashMap<u32, (u64, u32)>>>;
+pub(crate) type ContextLock = Arc<Mutex<()>>;
 
 /// O contexto imediato de um [`crate::core::Device`] — por onde comandos
 /// de limpeza/desenho são de fato submetidos à GPU.
 pub struct Context {
     #[cfg(target_os = "windows")]
     pub(crate) raw: ID3D11DeviceContext,
+    bound_index_buffer: std::sync::Arc<std::sync::Mutex<Option<(u64, crate::input::IndexFormat)>>>,
+    bound_vertex_buffers: VertexBufferBindings,
+    context_lock: ContextLock,
+    limits: DeviceLimits,
 }
 
 impl Context {
+    pub(crate) fn limits(&self) -> DeviceLimits {
+        self.limits
+    }
+
     #[cfg(target_os = "windows")]
-    pub(crate) fn from_raw(raw: ID3D11DeviceContext) -> Self {
-        Self { raw }
+    pub(crate) fn from_raw(raw: ID3D11DeviceContext, limits: DeviceLimits) -> Self {
+        Self::from_raw_with_shared(
+            raw,
+            std::sync::Arc::new(std::sync::Mutex::new(None)),
+            std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+            std::sync::Arc::new(std::sync::Mutex::new(())),
+            limits,
+        )
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn from_raw_with_shared(
+        raw: ID3D11DeviceContext,
+        bound_index_buffer: std::sync::Arc<
+            std::sync::Mutex<Option<(u64, crate::input::IndexFormat)>>,
+        >,
+        bound_vertex_buffers: VertexBufferBindings,
+        context_lock: ContextLock,
+        limits: DeviceLimits,
+    ) -> Self {
+        Self {
+            raw,
+            bound_index_buffer,
+            bound_vertex_buffers,
+            context_lock,
+            limits,
+        }
+    }
+
+    pub(crate) fn lock_context(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.context_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Define `view` como o único alvo de renderização atual, sem depth
@@ -52,9 +109,11 @@ impl Context {
     /// Múltiplos alvos simultâneos (MRT) ainda não são suportados — isso
     /// entra quando `view`/`texture` tiverem mais do que `RenderTargetView`.
     pub fn set_render_target(&self, view: &RenderTargetView) {
+        let _guard = self.lock_context();
         #[cfg(target_os = "windows")]
         unsafe {
-            self.raw.OMSetRenderTargets(Some(&[Some(view.raw.clone())]), None);
+            self.raw
+                .OMSetRenderTargets(Some(&[Some(view.raw.clone())]), None);
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -70,6 +129,7 @@ impl Context {
         view: &RenderTargetView,
         depth: &crate::view::DepthStencilView,
     ) {
+        let _guard = self.lock_context();
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw
@@ -83,7 +143,13 @@ impl Context {
 
     /// Limpa `view` (um depth buffer) com o valor de profundidade dado
     /// (normalmente `1.0`, o mais longe possível).
-    pub fn clear_depth(&self, view: &crate::view::DepthStencilView, depth: f32) {
+    pub fn clear_depth(
+        &self,
+        view: &crate::view::DepthStencilView,
+        depth: f32,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        validate_depth_value(depth)?;
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw.ClearDepthStencilView(
@@ -97,11 +163,13 @@ impl Context {
         {
             let _ = (view, depth);
         }
+        Ok(())
     }
 
     /// Define o estado de teste/escrita de profundidade usado pelos
     /// próximos `draw()`.
     pub fn set_depth_stencil_state(&self, state: &crate::depth_stencil::DepthStencilState) {
+        let _guard = self.lock_context();
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw.OMSetDepthStencilState(&state.raw, 0);
@@ -114,9 +182,11 @@ impl Context {
 
     /// Define o estado de blending usado pelos próximos `draw()`.
     pub fn set_blend_state(&self, state: &crate::blend::BlendState) {
+        let _guard = self.lock_context();
         #[cfg(target_os = "windows")]
         unsafe {
-            self.raw.OMSetBlendState(&state.raw, Some(&[1.0, 1.0, 1.0, 1.0]), 0xffffffff);
+            self.raw
+                .OMSetBlendState(&state.raw, Some(&[1.0, 1.0, 1.0, 1.0]), 0xffffffff);
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -126,6 +196,7 @@ impl Context {
 
     /// Limpa `view` inteira com a cor dada (RGBA, 0.0–1.0).
     pub fn clear_render_target(&self, view: &RenderTargetView, color: [f32; 4]) {
+        let _guard = self.lock_context();
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw.ClearRenderTargetView(&view.raw, &color);
@@ -138,6 +209,7 @@ impl Context {
 
     /// Força o envio de qualquer comando ainda pendente no contexto para a GPU.
     pub fn flush(&self) {
+        let _guard = self.lock_context();
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw.Flush();
@@ -147,7 +219,9 @@ impl Context {
     /// Define a região da superfície de destino em que a rasterização
     /// desenha. Sem isso, nada é rasterizado mesmo com o resto do
     /// pipeline configurado corretamente.
-    pub fn set_viewport(&self, viewport: Viewport) {
+    pub fn set_viewport(&self, viewport: Viewport) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        validate_viewport(viewport, self.limits.max_viewport_dimension)?;
         #[cfg(target_os = "windows")]
         unsafe {
             use windows::Win32::Graphics::Direct3D11::D3D11_VIEWPORT;
@@ -164,17 +238,28 @@ impl Context {
         {
             let _ = viewport;
         }
+        Ok(())
     }
 
     /// Define o pipeline gráfico (shaders, input layout, topologia) a ser
     /// usado pelos próximos `draw()`.
     pub fn set_pipeline(&self, pipeline: &GraphicsPipeline) {
+        let _guard = self.lock_context();
         #[cfg(target_os = "windows")]
         unsafe {
+            self.raw.RSSetState(&pipeline.rasterizer_state);
+            self.raw.OMSetBlendState(
+                &pipeline.blend_state,
+                Some(&[1.0, 1.0, 1.0, 1.0]),
+                0xffffffff,
+            );
+            self.raw
+                .OMSetDepthStencilState(&pipeline.depth_stencil_state, pipeline.stencil_reference);
             self.raw.IASetInputLayout(&pipeline.input_layout);
             self.raw.VSSetShader(&pipeline.vertex_shader, None);
             self.raw.PSSetShader(&pipeline.pixel_shader, None);
-            self.raw.IASetPrimitiveTopology(topology_to_d3d(pipeline.primitive_topology));
+            self.raw
+                .IASetPrimitiveTopology(topology_to_d3d(pipeline.primitive_topology));
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -184,7 +269,36 @@ impl Context {
 
     /// Vincula `buffer` ao slot `slot` de vertex buffer, com o `stride`
     /// (tamanho de um vértice, em bytes) dado.
-    pub fn set_vertex_buffer(&self, slot: u32, buffer: &Buffer, stride: u32) {
+    pub fn set_vertex_buffer(
+        &self,
+        slot: u32,
+        buffer: &Buffer,
+        stride: u32,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if slot >= self.limits.max_vertex_buffer_bindings {
+            return Err(crate::core::GraphicsError::OutOfBounds {
+                resource: "vertex buffer slots",
+                offset: slot as u64,
+                size: 1,
+                limit: self.limits.max_vertex_buffer_bindings as u64,
+            });
+        }
+        if buffer.usage() != crate::buffer::BufferUsage::Vertex {
+            return Err(crate::core::GraphicsError::IncompatibleResource {
+                operation: "set_vertex_buffer",
+                reason: "o buffer precisa ter BufferUsage::Vertex".into(),
+            });
+        }
+        if stride == 0 || stride as u64 > buffer.size() {
+            return Err(crate::core::GraphicsError::InvalidArgument {
+                name: "vertex stride",
+                reason: format!(
+                    "precisa estar entre 1 e o tamanho do buffer ({})",
+                    buffer.size()
+                ),
+            });
+        }
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw.IASetVertexBuffers(
@@ -199,13 +313,47 @@ impl Context {
         {
             let _ = (slot, buffer, stride);
         }
+        self.bound_vertex_buffers
+            .lock()
+            .map_err(|_| {
+                crate::core::GraphicsError::Backend(
+                    "estado interno dos vertex buffers foi envenenado".into(),
+                )
+            })?
+            .insert(slot, (buffer.size(), stride));
+        Ok(())
     }
 
     /// Vincula `buffer` como o index buffer atual, no formato `format`.
-    pub fn set_index_buffer(&self, buffer: &Buffer, format: crate::input::IndexFormat) {
+    pub fn set_index_buffer(
+        &self,
+        buffer: &Buffer,
+        format: crate::input::IndexFormat,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if buffer.usage() != crate::buffer::BufferUsage::Index {
+            return Err(crate::core::GraphicsError::IncompatibleResource {
+                operation: "set_index_buffer",
+                reason: "o buffer precisa ter BufferUsage::Index".into(),
+            });
+        }
+        let index_size = match format {
+            crate::input::IndexFormat::Uint16 => 2,
+            crate::input::IndexFormat::Uint32 => 4,
+        };
+        if buffer.size() % index_size != 0 {
+            return Err(crate::core::GraphicsError::InvalidArgument {
+                name: "index buffer size",
+                reason: format!(
+                    "o tamanho precisa ser múltiplo de {index_size} bytes para {format:?}"
+                ),
+            });
+        }
         #[cfg(target_os = "windows")]
         unsafe {
-            use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R32_UINT};
+            use windows::Win32::Graphics::Dxgi::Common::{
+                DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R32_UINT,
+            };
             let dxgi_format = match format {
                 crate::input::IndexFormat::Uint16 => DXGI_FORMAT_R16_UINT,
                 crate::input::IndexFormat::Uint32 => DXGI_FORMAT_R32_UINT,
@@ -216,13 +364,60 @@ impl Context {
         {
             let _ = (buffer, format);
         }
+        *self.bound_index_buffer.lock().map_err(|_| {
+            crate::core::GraphicsError::Backend("estado interno do contexto envenenado".into())
+        })? = Some((buffer.size(), format));
+        Ok(())
     }
 
     /// Desenha `index_count` índices a partir de `first_index`, somando
     /// `base_vertex` a cada índice antes de buscar o vértice correspondente
     /// — usa o pipeline, os vertex buffers e o index buffer vinculados
     /// atualmente.
-    pub fn draw_indexed(&self, index_count: u32, first_index: u32, base_vertex: i32) {
+    pub fn draw_indexed(
+        &self,
+        index_count: u32,
+        first_index: u32,
+        base_vertex: i32,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        {
+            let bound = self.bound_index_buffer.lock().map_err(|_| {
+                crate::core::GraphicsError::Backend("estado interno do contexto envenenado".into())
+            })?;
+            let (buffer_size, format) =
+                bound.ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                    name: "draw_indexed",
+                    reason: "nenhum index buffer foi vinculado".into(),
+                })?;
+            let element_size = match format {
+                crate::input::IndexFormat::Uint16 => 2u64,
+                crate::input::IndexFormat::Uint32 => 4u64,
+            };
+            let offset = (first_index as u64)
+                .checked_mul(element_size)
+                .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                    name: "first_index",
+                    reason: "overflow no cálculo do offset".into(),
+                })?;
+            let size = (index_count as u64)
+                .checked_mul(element_size)
+                .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                    name: "index_count",
+                    reason: "overflow no cálculo do tamanho".into(),
+                })?;
+            if offset
+                .checked_add(size)
+                .map_or(true, |end| end > buffer_size)
+            {
+                return Err(crate::core::GraphicsError::OutOfBounds {
+                    resource: "index buffer",
+                    offset,
+                    size,
+                    limit: buffer_size,
+                });
+            }
+        }
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw.DrawIndexed(index_count, first_index, base_vertex);
@@ -231,11 +426,57 @@ impl Context {
         {
             let _ = (index_count, first_index, base_vertex);
         }
+        Ok(())
     }
 
     /// Desenha `vertex_count` vértices a partir de `first_vertex`, usando
     /// o pipeline e os vertex buffers vinculados atualmente.
-    pub fn draw(&self, vertex_count: u32, first_vertex: u32) {
+    pub fn draw(
+        &self,
+        vertex_count: u32,
+        first_vertex: u32,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if vertex_count == 0 {
+            return Ok(());
+        }
+        let end_vertex = first_vertex.checked_add(vertex_count).ok_or_else(|| {
+            crate::core::GraphicsError::InvalidArgument {
+                name: "draw vertex range",
+                reason: "first_vertex + vertex_count excede u32::MAX".into(),
+            }
+        })?;
+        if let Some(&(buffer_size, stride)) = self
+            .bound_vertex_buffers
+            .lock()
+            .map_err(|_| {
+                crate::core::GraphicsError::Backend(
+                    "estado interno dos vertex buffers foi envenenado".into(),
+                )
+            })?
+            .get(&0)
+        {
+            let offset = (first_vertex as u64)
+                .checked_mul(stride as u64)
+                .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                    name: "first_vertex",
+                    reason: "overflow ao calcular o offset do vertex buffer".into(),
+                })?;
+            let end = (end_vertex as u64)
+                .checked_mul(stride as u64)
+                .ok_or_else(|| crate::core::GraphicsError::InvalidArgument {
+                    name: "vertex_count",
+                    reason: "overflow ao calcular o fim do vertex buffer".into(),
+                })?;
+            if end > buffer_size {
+                return Err(crate::core::GraphicsError::OutOfBounds {
+                    resource: "vertex buffer slot 0",
+                    offset,
+                    size: end - offset,
+                    limit: buffer_size,
+                });
+            }
+        }
         #[cfg(target_os = "windows")]
         unsafe {
             self.raw.Draw(vertex_count, first_vertex);
@@ -244,11 +485,31 @@ impl Context {
         {
             let _ = (vertex_count, first_vertex);
         }
+        Ok(())
     }
 
     /// Vincula `buffer` ao slot `slot` de constant buffer, visível tanto
     /// para o vertex quanto para o pixel shader.
-    pub fn set_constant_buffer(&self, slot: u32, buffer: &Buffer) {
+    pub fn set_constant_buffer(
+        &self,
+        slot: u32,
+        buffer: &Buffer,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if slot >= self.limits.max_uniform_buffer_bindings {
+            return Err(crate::core::GraphicsError::OutOfBounds {
+                resource: "uniform buffer slots",
+                offset: slot as u64,
+                size: 1,
+                limit: self.limits.max_uniform_buffer_bindings as u64,
+            });
+        }
+        if buffer.usage() != crate::buffer::BufferUsage::Constant {
+            return Err(crate::core::GraphicsError::IncompatibleResource {
+                operation: "set_constant_buffer",
+                reason: "o buffer precisa ter BufferUsage::Constant".into(),
+            });
+        }
         #[cfg(target_os = "windows")]
         unsafe {
             let slice = Some(&[Some(buffer.raw.clone())][..]);
@@ -259,52 +520,154 @@ impl Context {
         {
             let _ = (slot, buffer);
         }
+        Ok(())
     }
 
     /// Vincula `view` ao slot `slot` de recurso de leitura do pixel shader.
-    pub fn set_shader_resource(&self, slot: u32, view: &ShaderResourceView) {
+    pub fn set_shader_resource(
+        &self,
+        slot: u32,
+        view: &ShaderResourceView,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if slot >= self.limits.max_sampled_resource_bindings {
+            return Err(crate::core::GraphicsError::OutOfBounds {
+                resource: "sampled resource slots",
+                offset: slot as u64,
+                size: 1,
+                limit: self.limits.max_sampled_resource_bindings as u64,
+            });
+        }
         #[cfg(target_os = "windows")]
         unsafe {
-            self.raw.PSSetShaderResources(slot, Some(&[Some(view.raw.clone())]));
+            self.raw
+                .PSSetShaderResources(slot, Some(&[Some(view.raw.clone())]));
         }
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (slot, view);
         }
+        Ok(())
     }
 
     /// Vincula `sampler` ao slot `slot` de sampler do pixel shader.
-    pub fn set_sampler(&self, slot: u32, sampler: &Sampler) {
+    pub fn set_sampler(
+        &self,
+        slot: u32,
+        sampler: &Sampler,
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if slot >= self.limits.max_sampler_bindings {
+            return Err(crate::core::GraphicsError::OutOfBounds {
+                resource: "pixel shader sampler slots",
+                offset: slot as u64,
+                size: 1,
+                limit: self.limits.max_sampler_bindings as u64,
+            });
+        }
         #[cfg(target_os = "windows")]
         unsafe {
-            self.raw.PSSetSamplers(slot, Some(&[Some(sampler.raw.clone())]));
+            self.raw
+                .PSSetSamplers(slot, Some(&[Some(sampler.raw.clone())]));
         }
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (slot, sampler);
         }
+        Ok(())
     }
 
     /// Sobrescreve todo o conteúdo de `buffer` com `data` (que deve ter
     /// exatamente `buffer.size()` bytes) — o jeito de atualizar, por
-    /// exemplo, um constant buffer de transform a cada quadro.
-    pub fn update_buffer(&self, buffer: &Buffer, data: &[u8]) {
+    /// exemplo, um constant buffer de transform a cada quadro. No D3D11 o
+    /// driver gerencia dependências com trabalho em voo; backends explícitos
+    /// deverão exigir sincronização ou retornar [`GraphicsError::ResourceBusy`].
+    pub fn update_buffer(
+        &self,
+        buffer: &Buffer,
+        data: &[u8],
+    ) -> Result<(), crate::core::GraphicsError> {
+        let _guard = self.lock_context();
+        if data.len() as u64 != buffer.size() {
+            return Err(crate::core::GraphicsError::DataSizeMismatch {
+                expected: buffer.size(),
+                actual: data.len() as u64,
+            });
+        }
+        if buffer.usage() == crate::buffer::BufferUsage::Staging {
+            return Err(crate::core::GraphicsError::IncompatibleResource {
+                operation: "update_buffer",
+                reason: "staging buffers são atualizados por mapeamento, não por UpdateSubresource"
+                    .into(),
+            });
+        }
+        if buffer.is_dynamic() {
+            return Err(crate::core::GraphicsError::IncompatibleResource {
+                operation: "update_buffer",
+                reason: "buffers dynamic devem ser atualizados com map_write_discard".into(),
+            });
+        }
         #[cfg(target_os = "windows")]
         unsafe {
-            self.raw.UpdateSubresource(
-                &buffer.raw,
-                0,
-                None,
-                data.as_ptr() as *const _,
-                0,
-                0,
-            );
+            self.raw
+                .UpdateSubresource(&buffer.raw, 0, None, data.as_ptr() as *const _, 0, 0);
         }
         #[cfg(not(target_os = "windows"))]
         {
             let _ = (buffer, data);
         }
+        Ok(())
     }
+}
+
+fn validate_viewport(
+    viewport: Viewport,
+    max_dimension: u32,
+) -> Result<(), crate::core::GraphicsError> {
+    let right = viewport.x + viewport.width;
+    let bottom = viewport.y + viewport.height;
+    if !viewport.x.is_finite()
+        || !viewport.y.is_finite()
+        || !viewport.width.is_finite()
+        || !viewport.height.is_finite()
+        || viewport.x < 0.0
+        || viewport.y < 0.0
+        || viewport.width <= 0.0
+        || viewport.height <= 0.0
+        || !right.is_finite()
+        || !bottom.is_finite()
+        || right > max_dimension as f32
+        || bottom > max_dimension as f32
+    {
+        return Err(crate::core::GraphicsError::InvalidArgument {
+            name: "Viewport",
+            reason: format!(
+                "x/y devem ser finitos e nao negativos, largura/altura positivas, e a extensao deve caber no limite {max_dimension}"
+            ),
+        });
+    }
+    if !viewport.min_depth.is_finite()
+        || !viewport.max_depth.is_finite()
+        || viewport.min_depth < 0.0
+        || viewport.max_depth > 1.0
+        || viewport.min_depth > viewport.max_depth
+    {
+        return Err(crate::core::GraphicsError::InvalidArgument {
+            name: "Viewport::depth_range",
+            reason: "deve satisfazer 0.0 <= min_depth <= max_depth <= 1.0".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_depth_value(depth: f32) -> Result<(), crate::core::GraphicsError> {
+    if !depth.is_finite() || !(0.0..=1.0).contains(&depth) {
+        return Err(crate::core::GraphicsError::InvalidArgument {
+            name: "depth",
+            reason: "deve ser um valor finito entre 0.0 e 1.0".into(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
