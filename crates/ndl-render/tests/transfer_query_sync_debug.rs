@@ -175,6 +175,7 @@ fn transfer_query_sync_and_debug_markers() {
                 size: vertex_bytes.len() as u64,
                 usage: BufferUsage::Vertex,
                 dynamic: false,
+                stride: 0,
             },
             vertex_bytes,
         )
@@ -187,6 +188,7 @@ fn transfer_query_sync_and_debug_markers() {
             size: vertex_bytes.len() as u64,
             usage: BufferUsage::Vertex,
             dynamic: false,
+                stride: 0,
         })
         .expect("falha ao criar o buffer de destino da cópia");
 

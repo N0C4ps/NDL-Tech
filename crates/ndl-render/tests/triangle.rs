@@ -190,6 +190,7 @@ fn draws_a_colored_triangle() {
                 size: vertex_bytes.len() as u64,
                 usage: BufferUsage::Vertex,
                 dynamic: false,
+                stride: 0,
             },
             vertex_bytes,
         )

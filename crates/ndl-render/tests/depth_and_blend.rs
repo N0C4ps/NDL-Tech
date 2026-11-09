@@ -204,6 +204,7 @@ fn depth_test_and_blend_with_indexed_draws() {
                 size: vertex_bytes.len() as u64,
                 usage: BufferUsage::Vertex,
                 dynamic: false,
+                stride: 0,
             },
             vertex_bytes,
         )
@@ -226,6 +227,7 @@ fn depth_test_and_blend_with_indexed_draws() {
                 size: index_bytes.len() as u64,
                 usage: BufferUsage::Index,
                 dynamic: false,
+                stride: 0,
             },
             index_bytes,
         )

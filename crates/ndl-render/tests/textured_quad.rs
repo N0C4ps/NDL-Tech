@@ -230,6 +230,7 @@ fn draws_a_textured_pulsing_quad() {
                 size: vertex_bytes.len() as u64,
                 usage: BufferUsage::Vertex,
                 dynamic: false,
+                stride: 0,
             },
             vertex_bytes,
         )
@@ -241,6 +242,7 @@ fn draws_a_textured_pulsing_quad() {
             size: 64, // float4x4
             usage: BufferUsage::Constant,
             dynamic: false,
+                stride: 0,
         })
         .expect("falha ao criar constant buffer");
 

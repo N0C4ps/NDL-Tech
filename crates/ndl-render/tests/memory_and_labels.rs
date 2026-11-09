@@ -193,6 +193,7 @@ fn constant_buffer_ring_and_resource_labels() {
                 size: vertex_bytes.len() as u64,
                 usage: BufferUsage::Vertex,
                 dynamic: false,
+                stride: 0,
             },
             vertex_bytes,
         )

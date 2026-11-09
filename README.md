@@ -46,26 +46,16 @@ cursor, monitores), com os backends `headless` e `windows` (via `winit`)
 funcionais — os backends `linux/x11`, `linux/wayland` e `macos` existem na
 árvore de módulos como stubs reservados para a integração real com cada SO.
 
-Só `compute` ainda é puramente reservado em `ndl-render` — precisa de
-compute shader como novo estágio programável, então fica para uma rodada
-dedicada.
-
-`ndl-render::core`, `format`, `surface`, `context`, `view`, `buffer`,
-`shader`, `input` (incluindo draw indexado), `pipeline`, `texture`,
-`sampler`, `raster` (`Viewport`), `depth_stencil`, `blend`, `command`,
-`queue`, `memory`, `resource`, `transfer`, `query`, `sync` e `debug` já
-são **reais**: dá para compilar HLSL em runtime (`shader::compile_hlsl`),
-criar vertex/pixel shader, input layout, vertex/index/constant buffer,
-texturas com upload de dados, samplers, depth buffer com teste de
-profundidade, blending com transparência, um `GraphicsPipeline`, gravar
-comandos num contexto diferido (`CommandEncoder`) e submetê-los numa
-`GraphicsQueue`, mapear um buffer dinâmico com desmapeio automático
-(`Context::map_write_discard` + `MappedBuffer`), girar entre N constant
-buffers (`memory::ConstantBufferRing`), nomear recursos para debug
-(`set_label`), copiar recursos (`Context::copy_buffer`/`copy_texture`),
-medir oclusão (`query::Query`), sincronizar CPU/GPU (`sync::GpuFence`),
-marcar grupos/eventos de debug (`push_debug_group`/`insert_debug_marker`),
-e desenhar geometria texturizada de verdade numa janela real.
+Todos os 25 módulos planejados de `ndl-render` já têm implementação real
+contra o backend Direct3D 11. Além de tudo que já fazia (device/adapter,
+surface/swapchain, buffers, shaders HLSL, texturas/sampler, pipeline,
+depth/blend, contextos diferidos/fila, alocadores de alto nível, cópias,
+queries, sincronização, debug), `compute` agora cobre compute shader
+(`shader::ComputeShader`), structured buffers lidos/escritos por GPU
+(`BufferUsage::Storage` + `UnorderedAccessView`), `ComputePipeline` e
+`Context::dispatch`. Buffers de staging (`BufferUsage::Staging`) e
+`Context::map_read` completam o ciclo, permitindo ler de volta o que um
+compute shader escreveu.
 
 `CommandEncoder` reaproveita a própria `Context` por baixo (via `Deref`) —
 no D3D11, um contexto diferido é a mesma interface do contexto imediato,

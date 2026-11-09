@@ -6,9 +6,9 @@
 //!
 //! ## Estado atual
 //!
-//! [`RenderTargetView`] (RTV), [`ShaderResourceView`] (SRV) e
-//! [`DepthStencilView`] (DSV) já são reais. `UnorderedAccessView` ainda
-//! não existe; entra quando `compute` for implementado de verdade.
+//! [`RenderTargetView`] (RTV), [`ShaderResourceView`] (SRV),
+//! [`DepthStencilView`] (DSV) e [`UnorderedAccessView`] (UAV) já são
+//! reais.
 //!
 //! Métodos de conveniência planejados para todas as views: `resource()`,
 //! `descriptor()`, `format()`, `dimension()`, `mip_range()`,
@@ -58,6 +58,23 @@ impl DepthStencilView {
     #[cfg(target_os = "windows")]
     pub(crate) fn from_raw(
         raw: windows::Win32::Graphics::Direct3D11::ID3D11DepthStencilView,
+    ) -> Self {
+        Self { raw }
+    }
+}
+
+/// Uma visualização de leitura/escrita não ordenada — o que permite a um
+/// compute shader ler e escrever um [`crate::buffer::Buffer`]
+/// (`BufferUsage::Storage`).
+pub struct UnorderedAccessView {
+    #[cfg(target_os = "windows")]
+    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11UnorderedAccessView,
+}
+
+impl UnorderedAccessView {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn from_raw(
+        raw: windows::Win32::Graphics::Direct3D11::ID3D11UnorderedAccessView,
     ) -> Self {
         Self { raw }
     }

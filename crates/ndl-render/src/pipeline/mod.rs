@@ -8,14 +8,14 @@
 //!
 //! [`GraphicsPipeline`] já é real, mas só com o essencial pra desenhar
 //! geometria colorida: vertex shader, pixel shader, input layout e
-//! topologia. Rasterizer/blend/depth-stencil states ainda não existem
-//! (entram quando `raster`/`blend`/`depth_stencil` forem implementados) —
-//! até lá, o pipeline usa os estados padrão do D3D11.
-//! `ComputePipeline` continua reservado.
+//! topologia — o pipeline ainda usa os estados padrão do D3D11 para
+//! rasterizer/blend/depth-stencil (ver [`crate::context::Context::set_blend_state`]/
+//! `set_depth_stencil_state` para configurar isso fora do pipeline, por
+//! enquanto). [`ComputePipeline`] também já é real.
 
 use crate::core::{Device, GraphicsError};
 use crate::input::{InputLayout, PrimitiveTopology};
-use crate::shader::{PixelShader, VertexShader};
+use crate::shader::{ComputeShader, PixelShader, VertexShader};
 
 /// Configuração usada para criar um [`GraphicsPipeline`].
 pub struct GraphicsPipelineDescriptor<'a> {
@@ -59,4 +59,34 @@ impl Device {
             ))
         }
     }
+
+    pub fn create_compute_pipeline(
+        &self,
+        desc: &ComputePipelineDescriptor<'_>,
+    ) -> Result<ComputePipeline, GraphicsError> {
+        #[cfg(target_os = "windows")]
+        {
+            return Ok(ComputePipeline {
+                compute_shader: desc.compute_shader.raw.clone(),
+            });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = desc;
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+}
+
+/// Configuração usada para criar um [`ComputePipeline`].
+pub struct ComputePipelineDescriptor<'a> {
+    pub compute_shader: &'a ComputeShader,
+}
+
+/// Um pipeline de computação: hoje, só o compute shader em si.
+pub struct ComputePipeline {
+    #[cfg(target_os = "windows")]
+    pub(crate) compute_shader: windows::Win32::Graphics::Direct3D11::ID3D11ComputeShader,
 }

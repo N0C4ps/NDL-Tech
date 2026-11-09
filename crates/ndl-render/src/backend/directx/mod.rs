@@ -24,9 +24,10 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_DEBUG,
     D3D11_CREATE_DEVICE_FLAG, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_WRITE_MASK_ALL,
     D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT,
-    D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_MAP_WRITE_DISCARD, D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_SAMPLER_DESC,
-    D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_TEXTURE_ADDRESS_CLAMP,
+    D3D11_BIND_UNORDERED_ACCESS, D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_WRITE_DISCARD, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
+    D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, D3D11_SAMPLER_DESC, D3D11_SDK_VERSION,
+    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_TEXTURE_ADDRESS_CLAMP,
     D3D11_TEXTURE_ADDRESS_MIRROR, D3D11_TEXTURE_ADDRESS_WRAP, D3D11_USAGE_DEFAULT,
     D3D11_USAGE_DYNAMIC,
 };
@@ -162,6 +163,8 @@ fn bind_flag_for_usage(usage: crate::buffer::BufferUsage) -> D3D11_BIND_FLAG {
         Vertex => D3D11_BIND_VERTEX_BUFFER,
         Index => D3D11_BIND_INDEX_BUFFER,
         Constant => D3D11_BIND_CONSTANT_BUFFER,
+        Storage => D3D11_BIND_FLAG(D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_UNORDERED_ACCESS.0),
+        Staging => D3D11_BIND_FLAG(0),
     }
 }
 
@@ -180,21 +183,36 @@ pub(crate) fn create_buffer(
         }
     }
 
+    let is_staging = matches!(desc.usage, crate::buffer::BufferUsage::Staging);
+
     let buffer_desc = D3D11_BUFFER_DESC {
         ByteWidth: desc.size as u32,
-        Usage: if desc.dynamic {
+        Usage: if is_staging {
+            windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING
+        } else if desc.dynamic {
             D3D11_USAGE_DYNAMIC
         } else {
             D3D11_USAGE_DEFAULT
         },
         BindFlags: bind_flag_for_usage(desc.usage).0 as u32,
-        CPUAccessFlags: if desc.dynamic {
+        CPUAccessFlags: if is_staging {
+            (windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ.0
+                | D3D11_CPU_ACCESS_WRITE.0) as u32
+        } else if desc.dynamic {
             D3D11_CPU_ACCESS_WRITE.0 as u32
         } else {
             0
         },
-        MiscFlags: 0,
-        StructureByteStride: 0,
+        MiscFlags: if matches!(desc.usage, crate::buffer::BufferUsage::Storage) {
+            D3D11_RESOURCE_MISC_BUFFER_STRUCTURED.0 as u32
+        } else {
+            0
+        },
+        StructureByteStride: if matches!(desc.usage, crate::buffer::BufferUsage::Storage) {
+            desc.stride
+        } else {
+            0
+        },
     };
 
     let initial_data = data.map(|bytes| D3D11_SUBRESOURCE_DATA {
@@ -216,7 +234,68 @@ pub(crate) fn create_buffer(
     let buffer = buffer
         .ok_or_else(|| GraphicsError::Backend("CreateBuffer não retornou um buffer".into()))?;
 
-    Ok(crate::buffer::Buffer::from_raw(buffer, desc.size, desc.usage))
+    Ok(crate::buffer::Buffer::from_raw(
+        buffer, desc.size, desc.usage, desc.stride,
+    ))
+}
+
+pub(crate) fn create_unordered_access_view(
+    device: &Device,
+    buffer: &crate::buffer::Buffer,
+) -> Result<crate::view::UnorderedAccessView, GraphicsError> {
+    use windows::Win32::Graphics::Direct3D11::{
+        ID3D11UnorderedAccessView, D3D11_UAV_DIMENSION_BUFFER,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC, D3D11_UNORDERED_ACCESS_VIEW_DESC_0,
+        D3D11_BUFFER_UAV,
+    };
+
+    let num_elements = (buffer.size() / buffer.stride().max(1) as u64) as u32;
+    let uav_desc = D3D11_UNORDERED_ACCESS_VIEW_DESC {
+        Format: DXGI_FORMAT_UNKNOWN,
+        ViewDimension: D3D11_UAV_DIMENSION_BUFFER,
+        Anonymous: D3D11_UNORDERED_ACCESS_VIEW_DESC_0 {
+            Buffer: D3D11_BUFFER_UAV {
+                FirstElement: 0,
+                NumElements: num_elements,
+                Flags: 0,
+            },
+        },
+    };
+
+    let mut view: Option<ID3D11UnorderedAccessView> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateUnorderedAccessView(&buffer.raw, Some(&uav_desc), Some(&mut view))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    let view = view.ok_or_else(|| {
+        GraphicsError::Backend("CreateUnorderedAccessView não retornou uma view".into())
+    })?;
+
+    Ok(crate::view::UnorderedAccessView::from_raw(view))
+}
+
+pub(crate) fn create_compute_shader(
+    device: &Device,
+    bytecode: &[u8],
+) -> Result<crate::shader::ComputeShader, GraphicsError> {
+    use windows::Win32::Graphics::Direct3D11::ID3D11ComputeShader;
+
+    let mut shader: Option<ID3D11ComputeShader> = None;
+    unsafe {
+        device
+            .raw
+            .device
+            .CreateComputeShader(bytecode, None, Some(&mut shader))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+    let shader = shader.ok_or_else(|| {
+        GraphicsError::Backend("CreateComputeShader não retornou um shader".into())
+    })?;
+    Ok(crate::shader::ComputeShader { raw: shader })
 }
 
 pub(crate) fn compile_hlsl(
@@ -397,6 +476,28 @@ pub(crate) fn map_write_discard<'a>(
         context,
         buffer,
         ptr: mapped.pData as *mut u8,
+        size: buffer.size() as usize,
+    })
+}
+
+pub(crate) fn map_read<'a>(
+    context: &'a crate::context::Context,
+    buffer: &'a crate::buffer::Buffer,
+) -> Result<crate::memory::ReadMappedBuffer<'a>, GraphicsError> {
+    use windows::Win32::Graphics::Direct3D11::D3D11_MAP_READ;
+
+    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+    unsafe {
+        context
+            .raw
+            .Map(&buffer.raw, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+    }
+    .map_err(|err| GraphicsError::Backend(err.to_string()))?;
+
+    Ok(crate::memory::ReadMappedBuffer {
+        context,
+        buffer,
+        ptr: mapped.pData as *const u8,
         size: buffer.size() as usize,
     })
 }

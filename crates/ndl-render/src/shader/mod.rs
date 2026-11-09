@@ -2,19 +2,19 @@
 //!
 //! ## Estado atual
 //!
-//! [`compile_hlsl`], [`VertexShader`] e [`PixelShader`] já são reais —
-//! cobrem o caminho mínimo pra desenhar geometria. Os demais estágios
-//! (hull, domain, geometry, compute) e reflexão de shader (assinaturas de
-//! entrada/saída, constant buffers, etc.) continuam reservados.
+//! [`compile_hlsl`], [`VertexShader`], [`PixelShader`] e [`ComputeShader`]
+//! já são reais. Hull/domain/geometry shader e reflexão de shader
+//! (assinaturas de entrada/saída, constant buffers, etc.) continuam
+//! reservados.
 //!
 //! | Estágio | Tipo Rust | Finalidade | Estado |
 //! |---|---|---|---|
 //! | Vertex | [`VertexShader`] | Processamento de vértices | real |
 //! | Pixel | [`PixelShader`] | Fragmentos/pixels | real |
+//! | Compute | [`ComputeShader`] | Computação geral na GPU | real |
 //! | Hull | `HullShader` | Controle de tesselação | reservado |
 //! | Domain | `DomainShader` | Avaliação da tesselação | reservado |
 //! | Geometry | `GeometryShader` | Processamento de primitivas | reservado |
-//! | Compute | `ComputeShader` | Computação geral na GPU | reservado |
 
 use crate::core::{Device, GraphicsError};
 
@@ -50,6 +50,12 @@ pub struct PixelShader {
     pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11PixelShader,
 }
 
+/// Um compute shader já criado no dispositivo.
+pub struct ComputeShader {
+    #[cfg(target_os = "windows")]
+    pub(crate) raw: windows::Win32::Graphics::Direct3D11::ID3D11ComputeShader,
+}
+
 impl Device {
     pub fn create_vertex_shader(&self, bytecode: &[u8]) -> Result<VertexShader, GraphicsError> {
         #[cfg(target_os = "windows")]
@@ -69,6 +75,20 @@ impl Device {
         #[cfg(target_os = "windows")]
         {
             return crate::backend::directx::create_pixel_shader(self, bytecode);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = bytecode;
+            Err(GraphicsError::Unsupported(
+                "nenhum backend gráfico implementado para este SO ainda",
+            ))
+        }
+    }
+
+    pub fn create_compute_shader(&self, bytecode: &[u8]) -> Result<ComputeShader, GraphicsError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::backend::directx::create_compute_shader(self, bytecode);
         }
         #[cfg(not(target_os = "windows"))]
         {

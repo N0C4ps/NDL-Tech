@@ -176,6 +176,7 @@ fn records_draw_in_a_deferred_context_and_submits_to_the_queue() {
                 size: vertex_bytes.len() as u64,
                 usage: BufferUsage::Vertex,
                 dynamic: false,
+                stride: 0,
             },
             vertex_bytes,
         )
